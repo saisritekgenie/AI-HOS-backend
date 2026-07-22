@@ -1,0 +1,142 @@
+const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
+
+const userSchema = new mongoose.Schema(
+  {
+    employeeId: {
+      type: String,
+      trim: true,
+      sparse: true,
+    },
+    uhid: {
+      type: String,
+      trim: true,
+      sparse: true,
+    },
+    firstName: {
+      type: String,
+      required: [true, "First name is required"],
+      trim: true,
+      maxlength: [50, "First name cannot exceed 50 characters"],
+    },
+    lastName: {
+      type: String,
+      required: [true, "Last name is required"],
+      trim: true,
+      maxlength: [50, "Last name cannot exceed 50 characters"],
+    },
+    mobile: {
+      type: String,
+      required: [true, "Mobile number is required"],
+      unique: true,
+      trim: true,
+      match: [/^[0-9]{10}$/, "Mobile number must be exactly 10 digits"],
+    },
+    email: {
+      type: String,
+      required: [true, "Email address is required"],
+      unique: true,
+      lowercase: true,
+      trim: true,
+      match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, "Please provide a valid email address"],
+    },
+    password: {
+      type: String,
+      required: [true, "Password is required"],
+      minlength: [6, "Password must be at least 6 characters long"],
+      select: false,
+    },
+    gender: {
+      type: String,
+      required: [true, "Gender is required"],
+      enum: {
+        values: ["MALE", "FEMALE", "OTHER"],
+        message: "Gender must be MALE, FEMALE, or OTHER",
+      },
+    },
+    role: {
+      type: String,
+      required: [true, "Role is required"],
+      enum: {
+        values: [
+          "SUPER_ADMIN",
+          "ADMIN",
+          "DOCTOR",
+          "RECEPTIONIST",
+          "NURSE",
+          "LAB_TECHNICIAN",
+          "PHARMACIST",
+          "CASHIER",
+          "PATIENT",
+        ],
+        message: "Invalid role specified",
+      },
+      default: "DOCTOR",
+    },
+    department: {
+      type: String,
+      trim: true,
+      default: "General",
+    },
+    branch: {
+      type: String,
+      trim: true,
+      default: "Main Branch",
+    },
+    bloodGroup: {
+      type: String,
+      enum: ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-", "N/A"],
+      default: "N/A",
+    },
+    emergencyContact: {
+      type: String,
+      trim: true,
+      default: "N/A",
+    },
+    profilePhoto: {
+      type: String,
+      default: "uploads/default-avatar.png",
+    },
+    status: {
+      type: String,
+      enum: {
+        values: ["ACTIVE", "INACTIVE", "PENDING_APPROVAL"],
+        message: "Status must be ACTIVE, INACTIVE, or PENDING_APPROVAL",
+      },
+      default: "ACTIVE",
+    },
+    hospital: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Hospital",
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Encrypt password using bcrypt before saving document
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) {
+    return;
+  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
+
+// Compare user entered password with hashed password in database
+userSchema.methods.matchPassword = async function (enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+// Transform to JSON - remove sensitive data like password
+userSchema.methods.toJSON = function () {
+  const obj = this.toObject();
+  delete obj.password;
+  delete obj.__v;
+  return obj;
+};
+
+const User = mongoose.model("User", userSchema);
+
+module.exports = User;
