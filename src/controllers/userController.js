@@ -1,6 +1,8 @@
 const userService = require("../services/userService");
+const auditLogService = require("../services/auditLogService");
 const asyncHandler = require("../utils/asyncHandler");
 const { successResponse } = require("../utils/apiResponse");
+
 
 /**
  * Helper to check if the current user has permission to access/modify a target user
@@ -55,6 +57,16 @@ const createUser = asyncHandler(async (req, res) => {
   }
 
   const newUser = await userService.createUser(userData);
+
+  // Log audit activity
+  await auditLogService.logActivity(req, {
+    module: newUser.role === "PATIENT" ? "PATIENT" : "USER",
+    action: newUser.role === "PATIENT" ? "REGISTER_PATIENT" : "CREATE_USER",
+    details: `Created new ${newUser.role} account for ${newUser.firstName} ${newUser.lastName}`,
+    targetId: newUser._id.toString(),
+    targetName: `${newUser.firstName} ${newUser.lastName}`
+  });
+
   return successResponse(res, 201, "User created successfully", newUser);
 });
 
@@ -71,9 +83,23 @@ const getUsers = asyncHandler(async (req, res) => {
     // Enforce hospital tenant isolation
     query.hospital = req.user.hospital.toString();
 
-    // Staff (non-ADMIN) can only query PATIENT users
+    // Staff (non-ADMIN) can query PATIENT, DOCTOR, or NURSE users, default to PATIENT
     if (userRole !== "ADMIN") {
-      query.role = "PATIENT";
+      if (req.query.role === "DOCTOR") {
+        query.role = "DOCTOR";
+      } else if (req.query.role === "NURSE") {
+        query.role = "NURSE";
+      } else {
+        query.role = "PATIENT";
+      }
+    } else {
+      if (!req.query.role) {
+        query.role = { $ne: "PATIENT" };
+      }
+    }
+  } else {
+    if (!req.query.role) {
+      query.role = { $ne: "PATIENT" };
     }
   }
 
@@ -139,6 +165,16 @@ const updateUser = asyncHandler(async (req, res) => {
   }
 
   const updatedUser = await userService.updateUser(req.params.id, req.body);
+
+  // Log audit activity
+  await auditLogService.logActivity(req, {
+    module: updatedUser.role === "PATIENT" ? "PATIENT" : "USER",
+    action: updatedUser.role === "PATIENT" ? "UPDATE_PATIENT" : "UPDATE_USER",
+    details: `Updated ${updatedUser.role} account details`,
+    targetId: updatedUser._id.toString(),
+    targetName: `${updatedUser.firstName} ${updatedUser.lastName}`
+  });
+
   return successResponse(res, 200, "User updated successfully", updatedUser);
 });
 
@@ -158,6 +194,16 @@ const deleteUser = asyncHandler(async (req, res) => {
   }
 
   await userService.deleteUser(req.params.id);
+
+  // Log audit activity
+  await auditLogService.logActivity(req, {
+    module: user.role === "PATIENT" ? "PATIENT" : "USER",
+    action: user.role === "PATIENT" ? "DELETE_PATIENT" : "DELETE_USER",
+    details: `Deleted ${user.role} account`,
+    targetId: user._id.toString(),
+    targetName: `${user.firstName} ${user.lastName}`
+  });
+
   return successResponse(res, 200, "User deleted successfully");
 });
 
@@ -177,6 +223,16 @@ const enableUser = asyncHandler(async (req, res) => {
   }
 
   const updatedUser = await userService.setUserStatus(req.params.id, "ACTIVE");
+
+  // Log audit activity
+  await auditLogService.logActivity(req, {
+    module: user.role === "PATIENT" ? "PATIENT" : "USER",
+    action: "STATUS_CHANGE",
+    details: `Enabled ${user.role} account (Set status to ACTIVE)`,
+    targetId: user._id.toString(),
+    targetName: `${user.firstName} ${user.lastName}`
+  });
+
   return successResponse(res, 200, "User account enabled successfully", updatedUser);
 });
 
@@ -196,6 +252,16 @@ const disableUser = asyncHandler(async (req, res) => {
   }
 
   const updatedUser = await userService.setUserStatus(req.params.id, "INACTIVE");
+
+  // Log audit activity
+  await auditLogService.logActivity(req, {
+    module: user.role === "PATIENT" ? "PATIENT" : "USER",
+    action: "STATUS_CHANGE",
+    details: `Disabled ${user.role} account (Set status to INACTIVE)`,
+    targetId: user._id.toString(),
+    targetName: `${user.firstName} ${user.lastName}`
+  });
+
   return successResponse(res, 200, "User account disabled successfully", updatedUser);
 });
 

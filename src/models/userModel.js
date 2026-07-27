@@ -109,6 +109,49 @@ const userSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Hospital",
     },
+    roomNo: {
+      type: String,
+      trim: true,
+      default: "N/A",
+    },
+    bedNo: {
+      type: String,
+      trim: true,
+      default: "N/A",
+    },
+    assignedDoctor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    registrationType: {
+      type: String,
+      enum: ["WALK_IN", "ONLINE", "EMERGENCY", "REFERRAL"],
+      default: "WALK_IN",
+    },
+    registeredBy: {
+      type: String,
+      default: "Receptionist",
+    },
+    allergies: {
+      type: [String],
+      default: [],
+    },
+    vaccinations: {
+      type: [String],
+      default: [],
+    },
+    chronicDiseases: {
+      type: [String],
+      default: [],
+    },
+    documents: [
+      {
+        name: { type: String, required: true },
+        url: { type: String, required: true },
+        uploadedAt: { type: Date, default: Date.now },
+        uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }
+      }
+    ],
   },
   {
     timestamps: true,

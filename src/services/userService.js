@@ -44,10 +44,26 @@ class UserService {
       userData.employeeId = `EMP-${1000 + count + 1}`;
     }
 
-    // Auto-generate UHID if Patient
+    // Auto-generate UHID if Patient based on Hospital Code and Registration Type
     if (role === "PATIENT" && !userData.uhid) {
-      const pCount = await User.countDocuments({ role: "PATIENT" });
-      userData.uhid = `UHID-2026-${1000 + pCount + 1}`;
+      const Hospital = require("../models/hospitalModel");
+      let hospitalCode = "UHID";
+      if (userData.hospital) {
+        const hosp = await Hospital.findById(userData.hospital);
+        if (hosp && hosp.code) {
+          hospitalCode = hosp.code.toUpperCase();
+        }
+      }
+
+      const regType = userData.registrationType || "WALK_IN";
+      let typeChar = "W";
+      if (regType === "ONLINE") typeChar = "O";
+      if (regType === "EMERGENCY") typeChar = "E";
+      if (regType === "REFERRAL") typeChar = "R";
+
+      const pCount = await User.countDocuments({ role: "PATIENT", hospital: userData.hospital });
+      const seqStr = String(pCount + 1).padStart(6, "0");
+      userData.uhid = `${hospitalCode}_${typeChar}_${seqStr}`;
     }
 
     // Create user
@@ -95,9 +111,8 @@ class UserService {
       ];
     }
 
-    // Filter by role
     if (role) {
-      query.role = role.toUpperCase();
+      query.role = typeof role === "string" ? role.toUpperCase() : role;
     }
 
     // Filter by department
@@ -115,6 +130,11 @@ class UserService {
       query.status = status.toUpperCase();
     }
 
+    // Filter by registrationType
+    if (queryParams.registrationType) {
+      query.registrationType = queryParams.registrationType.toUpperCase();
+    }
+
     // Pagination calculations
     const pageNum = parseInt(page, 10) || 1;
     const limitNum = parseInt(limit, 10) || 10;
@@ -122,6 +142,8 @@ class UserService {
 
     const sort = {};
     sort[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    console.log("[userService.getUsers] Built Mongoose query:", JSON.stringify(query, null, 2));
 
     const [users, totalRecords] = await Promise.all([
       User.find(query).sort(sort).skip(skip).limit(limitNum),
