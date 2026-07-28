@@ -1,6 +1,6 @@
 const Hospital = require("../models/hospitalModel");
 const User = require("../models/userModel");
-const AuditLog = require("../models/auditLogModel");
+const auditLogService = require("../services/auditLogService");
 const AppError = require("../utils/appError");
 const asyncHandler = require("../utils/asyncHandler");
 const { successResponse } = require("../utils/apiResponse");
@@ -112,9 +112,9 @@ const approveHospital = asyncHandler(async (req, res) => {
   }
 
   // Log Audit
-  await AuditLog.create({
+  await auditLogService.logActivity(req, {
     hospital: hospital._id,
-    performedBy: req.user._id,
+    module: "SETTINGS",
     action: "APPROVE_HOSPITAL",
     details: `Approved hospital ${hospital.name} (${hospital.code}) and activated admin account.`,
   });
@@ -141,9 +141,9 @@ const rejectHospital = asyncHandler(async (req, res) => {
   }
 
   // Log Audit
-  await AuditLog.create({
+  await auditLogService.logActivity(req, {
     hospital: hospital._id,
-    performedBy: req.user._id,
+    module: "SETTINGS",
     action: "REJECT_HOSPITAL",
     details: `Deactivated/Rejected hospital ${hospital.name} (${hospital.code}).`,
   });
