@@ -119,6 +119,16 @@ const bookAppointment = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
   const { patientId, doctorId, appointmentDate, timeSlot, notes } = req.body;
 
+  const doctor = await User.findById(doctorId);
+  if (!doctor || doctor.role !== "DOCTOR" || doctor.status !== "ACTIVE") {
+    throw new AppError("Cannot book appointment. The selected doctor is inactive or not working.", 400);
+  }
+
+  const patient = await User.findById(patientId);
+  if (!patient || patient.role !== "PATIENT" || patient.status !== "ACTIVE") {
+    throw new AppError("Cannot book appointment. The patient profile is inactive.", 400);
+  }
+
   const startOfDay = new Date(appointmentDate);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(appointmentDate);
@@ -144,7 +154,6 @@ const bookAppointment = asyncHandler(async (req, res) => {
   });
 
   // Log audit activity
-  const patient = await User.findById(patientId);
   await auditLogService.logActivity(req, {
     module: "APPOINTMENT",
     action: "BOOK_APPOINTMENT",
@@ -223,6 +232,16 @@ const createInvoice = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
   const { patientId, doctorId, billAmount, paymentMethod, paymentStatus } = req.body;
 
+  const doctor = await User.findById(doctorId);
+  if (!doctor || doctor.role !== "DOCTOR" || doctor.status !== "ACTIVE") {
+    throw new AppError("Cannot generate invoice. The selected doctor is inactive or not working.", 400);
+  }
+
+  const patient = await User.findById(patientId);
+  if (!patient || patient.role !== "PATIENT" || patient.status !== "ACTIVE") {
+    throw new AppError("Cannot generate invoice. The patient profile is inactive.", 400);
+  }
+
   const count = await Invoice.countDocuments({ hospital: hospitalId });
   const invoiceNumber = `INV-${new Date().getFullYear()}-${10001 + count}`;
 
@@ -247,9 +266,20 @@ const payInvoice = asyncHandler(async (req, res) => {
   const invoiceId = req.params.id;
   const { paymentMethod } = req.body;
 
-  const invoice = await Invoice.findOne({ _id: invoiceId, hospital: hospitalId });
+  const invoice = await Invoice.findOne({ _id: invoiceId, hospital: hospitalId })
+    .populate("doctor")
+    .populate("patient");
+
   if (!invoice) {
     throw new AppError("Invoice not found", 404);
+  }
+
+  if (invoice.doctor && invoice.doctor.status !== "ACTIVE") {
+    throw new AppError("Cannot process payment. The associated doctor is inactive or not working.", 400);
+  }
+
+  if (invoice.patient && invoice.patient.status !== "ACTIVE") {
+    throw new AppError("Cannot process payment. The patient profile is inactive.", 400);
   }
 
   invoice.paymentStatus = "PAID";
@@ -298,6 +328,11 @@ const createAdmission = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
   const { patientId, department, wardNo, bedNo } = req.body;
 
+  const patient = await User.findOne({ _id: patientId, role: "PATIENT", hospital: hospitalId });
+  if (!patient || patient.status !== "ACTIVE") {
+    throw new AppError("Cannot admit patient. The patient profile is inactive.", 400);
+  }
+
   const admission = await AdmissionRecord.create({
     patient: patientId,
     hospital: hospitalId,
@@ -307,13 +342,10 @@ const createAdmission = asyncHandler(async (req, res) => {
     status: "ADMITTED"
   });
 
-  // Automatically update room & bed number on patient (User model)
-  const patient = await User.findOne({ _id: patientId, role: "PATIENT", hospital: hospitalId });
-  if (patient) {
-    patient.roomNo = wardNo;
-    patient.bedNo = bedNo;
-    await patient.save();
-  }
+  // Automatically update room & bed number on patient
+  patient.roomNo = wardNo;
+  patient.bedNo = bedNo;
+  await patient.save();
 
   // Log audit activity
   await auditLogService.logActivity(req, {
@@ -321,7 +353,7 @@ const createAdmission = asyncHandler(async (req, res) => {
     action: "ADMIT_PATIENT",
     details: `Admitted patient to ward '${wardNo}' (Bed: ${bedNo}, Department: ${department})`,
     targetId: admission._id.toString(),
-    targetName: patient ? `${patient.firstName} ${patient.lastName}` : "Unknown Patient"
+    targetName: `${patient.firstName} ${patient.lastName}`
   });
 
   return successResponse(res, 201, "Patient admitted successfully and bed assigned", admission);

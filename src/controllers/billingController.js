@@ -225,6 +225,11 @@ const createInvoice = asyncHandler(async (req, res) => {
     throw new AppError("Invalid inputs provided for billing invoice generation", 400);
   }
 
+  const patient = await User.findById(patientId);
+  if (!patient || patient.role !== "PATIENT" || patient.status !== "ACTIVE") {
+    throw new AppError("Cannot generate billing invoice. The patient profile is inactive.", 400);
+  }
+
   const count = await BillingInvoice.countDocuments({ hospital: hospitalId });
   const billNumber = `INV-${new Date().getFullYear()}-${10001 + count}`;
 
@@ -275,10 +280,14 @@ const payInvoice = asyncHandler(async (req, res) => {
   }
 
   const invoice = await BillingInvoice.findOne({ _id: req.params.id, hospital: hospitalId })
-    .populate("patient", "firstName lastName uhid");
+    .populate("patient", "firstName lastName uhid status");
 
   if (!invoice) {
     throw new AppError("Billing invoice not found", 404);
+  }
+
+  if (invoice.patient && invoice.patient.status !== "ACTIVE") {
+    throw new AppError("Cannot process payment. The patient profile is inactive.", 400);
   }
 
   if (invoice.paymentStatus === "PAID") {
@@ -438,6 +447,11 @@ const createAdvancePayment = asyncHandler(async (req, res) => {
 
   if (!patientId || !amount || amount <= 0 || !paymentMethod) {
     throw new AppError("Invalid advance payment details. Please supply patient, amount, and mode.", 400);
+  }
+
+  const patient = await User.findById(patientId);
+  if (!patient || patient.role !== "PATIENT" || patient.status !== "ACTIVE") {
+    throw new AppError("Cannot record advance payment. The patient profile is inactive.", 400);
   }
 
   const count = await AdvancePayment.countDocuments({ hospital: hospitalId });
@@ -617,6 +631,11 @@ const generateDischargeBill = asyncHandler(async (req, res) => {
 
   if (!patientId || !admissionId || amount === undefined) {
     throw new AppError("Invalid inputs for discharge billing generation", 400);
+  }
+
+  const patient = await User.findById(patientId);
+  if (!patient || patient.role !== "PATIENT" || patient.status !== "ACTIVE") {
+    throw new AppError("Cannot generate discharge bill. The patient profile is inactive.", 400);
   }
 
   const count = await BillingInvoice.countDocuments({ hospital: hospitalId });

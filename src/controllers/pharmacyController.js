@@ -201,6 +201,11 @@ const generatePharmacyBill = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
   const { patientId, items, paymentStatus, paymentMethod } = req.body;
 
+  const patient = await User.findById(patientId);
+  if (!patient || patient.role !== "PATIENT" || patient.status !== "ACTIVE") {
+    throw new AppError("Cannot generate pharmacy bill. The patient profile is inactive.", 400);
+  }
+
   const count = await PharmacyBill.countDocuments({ hospital: hospitalId });
   const billNumber = `BILL-${new Date().getFullYear()}-${80001 + count}`;
 
@@ -226,9 +231,14 @@ const payPharmacyBill = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
   const { paymentMethod } = req.body;
 
-  const bill = await PharmacyBill.findOne({ _id: req.params.id, hospital: hospitalId });
+  const bill = await PharmacyBill.findOne({ _id: req.params.id, hospital: hospitalId })
+    .populate("patient");
   if (!bill) {
     throw new AppError("Invoice not found", 404);
+  }
+
+  if (bill.patient && bill.patient.status !== "ACTIVE") {
+    throw new AppError("Cannot process pharmacy payment. The patient profile is inactive.", 400);
   }
 
   bill.paymentStatus = "PAID";

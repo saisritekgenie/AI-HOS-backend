@@ -86,7 +86,13 @@ const billingInvoiceSchema = new mongoose.Schema(
 );
 
 // Pre-save middleware to keep amountDue up to date
-billingInvoiceSchema.pre("save", function(next) {
+billingInvoiceSchema.pre("save", function() {
+  if (this.amountPaid === undefined || this.amountPaid === null) {
+    this.amountPaid = 0;
+  }
+  if (this.paymentStatus === "PAID" && this.amountPaid < this.amount) {
+    this.amountPaid = this.amount;
+  }
   this.amountDue = this.amount - this.amountPaid;
   if (this.amountDue <= 0) {
     this.amountDue = 0;
@@ -94,7 +100,6 @@ billingInvoiceSchema.pre("save", function(next) {
   } else if (this.amountPaid > 0 && this.amountDue > 0) {
     this.paymentStatus = "PARTIAL";
   }
-  next();
 });
 
 const BillingInvoice = mongoose.model("BillingInvoice", billingInvoiceSchema);
