@@ -38,6 +38,11 @@ const appointmentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    bookingMode: {
+      type: String,
+      enum: ["WALK_IN", "ONLINE"],
+      default: "WALK_IN",
+    },
     checkInTime: {
       type: Date,
     },

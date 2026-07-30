@@ -13,6 +13,12 @@ const userSchema = new mongoose.Schema(
       trim: true,
       sparse: true,
     },
+    patientId: {
+      type: String,
+      trim: true,
+      sparse: true,
+      unique: true,
+    },
     firstName: {
       type: String,
       required: [true, "First name is required"],
@@ -150,6 +156,32 @@ const userSchema = new mongoose.Schema(
         url: { type: String, required: true },
         uploadedAt: { type: Date, default: Date.now },
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }
+      }
+    ],
+    dob: {
+      type: Date,
+    },
+    age: {
+      type: Number,
+    },
+    address: {
+      type: String,
+      trim: true,
+    },
+    medicalAlerts: {
+      type: [String],
+      default: [],
+    },
+    insurance: {
+      provider: { type: String, trim: true, default: "" },
+      policyNumber: { type: String, trim: true, default: "" },
+      coverageAmount: { type: Number, default: 0 },
+      expiryDate: { type: Date },
+    },
+    familyMapping: [
+      {
+        patient: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        relation: { type: String, trim: true },
       }
     ],
   },

@@ -162,33 +162,34 @@ const getInvoices = asyncHandler(async (req, res) => {
   if (invoices.length === 0 && search === "" && page == 1) {
     const patients = await User.find({ role: "PATIENT", hospital: hospitalId });
     if (patients.length > 0) {
+      const targetPatientId = req.user.role === "PATIENT" ? req.user._id : patients[0]._id;
       const seedData = [
         {
           hospital: hospitalId,
-          patient: patients[0]._id,
+          patient: targetPatientId,
           category: "CONSULTATION",
           itemName: "Dr. Adams - General Consultation Fee",
           amount: 500, // INR
           paymentStatus: "UNPAID",
-          billNumber: `INV-${new Date().getFullYear()}-00101`
+          billNumber: `INV-${new Date().getFullYear()}-00101-${targetPatientId.toString().slice(-4)}`
         },
         {
           hospital: hospitalId,
-          patient: patients[0]._id,
+          patient: targetPatientId,
           category: "LAB",
           itemName: "Full Metabolic Panel (FMP) Diagnostics",
           amount: 1200, // INR
           paymentStatus: "UNPAID",
-          billNumber: `INV-${new Date().getFullYear()}-00102`
+          billNumber: `INV-${new Date().getFullYear()}-00102-${targetPatientId.toString().slice(-4)}`
         },
         {
           hospital: hospitalId,
-          patient: patients[0]._id,
+          patient: targetPatientId,
           category: "PHARMACY",
           itemName: "Antibiotics & Paracetamol dispensation",
           amount: 450, // INR
           paymentStatus: "UNPAID",
-          billNumber: `INV-${new Date().getFullYear()}-00103`
+          billNumber: `INV-${new Date().getFullYear()}-00103-${targetPatientId.toString().slice(-4)}`
         }
       ];
 

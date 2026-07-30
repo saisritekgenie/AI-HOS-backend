@@ -265,6 +265,54 @@ const disableUser = asyncHandler(async (req, res) => {
   return successResponse(res, 200, "User account disabled successfully", updatedUser);
 });
 
+/**
+ * @desc    Check if a duplicate patient already exists
+ * @route   POST /api/super-admin/users/check-duplicate
+ * @access  Private
+ */
+const checkDuplicatePatient = asyncHandler(async (req, res) => {
+  const hospital = req.user.hospital.toString();
+  const duplicate = await userService.checkDuplicatePatient({ ...req.body, hospital });
+  return successResponse(res, 200, "Duplicate check completed", { duplicate });
+});
+
+/**
+ * @desc    Merge duplicate patient profiles
+ * @route   POST /api/super-admin/users/merge
+ * @access  Private
+ */
+const mergePatients = asyncHandler(async (req, res) => {
+  const { primaryPatientId, secondaryPatientId } = req.body;
+  const hospital = req.user.hospital.toString();
+
+  if (!primaryPatientId || !secondaryPatientId) {
+    return res.status(400).json({
+      success: false,
+      message: "Please specify both primaryPatientId and secondaryPatientId",
+    });
+  }
+
+  if (primaryPatientId === secondaryPatientId) {
+    return res.status(400).json({
+      success: false,
+      message: "Primary and duplicate patient profiles cannot be the same",
+    });
+  }
+
+  const primaryPatient = await userService.mergePatients(primaryPatientId, secondaryPatientId, hospital);
+
+  // Log audit activity
+  await auditLogService.logActivity(req, {
+    module: "PATIENT",
+    action: "MERGE_PATIENTS",
+    details: `Merged patient profile of secondary patient into primary patient (${primaryPatient.firstName} ${primaryPatient.lastName})`,
+    targetId: primaryPatient._id.toString(),
+    targetName: `${primaryPatient.firstName} ${primaryPatient.lastName}`
+  });
+
+  return successResponse(res, 200, "Patients merged successfully", primaryPatient);
+});
+
 module.exports = {
   createUser,
   getUsers,
@@ -273,4 +321,6 @@ module.exports = {
   deleteUser,
   enableUser,
   disableUser,
+  checkDuplicatePatient,
+  mergePatients,
 };

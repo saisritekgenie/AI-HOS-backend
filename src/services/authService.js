@@ -17,27 +17,31 @@ class AuthService {
     }
 
     // 2) Check user status
-    if (user.status === "PENDING_APPROVAL") {
-      throw new AppError(
-        "Your hospital registration is pending Super Admin approval. Please wait until access is granted.",
-        403
-      );
-    }
-
-    if (user.status === "INACTIVE") {
-      throw new AppError("Your account has been deactivated. Please contact administration.", 403);
+    if (user.status !== "ACTIVE") {
+      if (user.status === "PENDING_APPROVAL") {
+        throw new AppError(
+          "Your hospital registration is pending Super Admin approval. Please wait until access is granted.",
+          403
+        );
+      }
+      if (user.status === "INACTIVE") {
+        throw new AppError("Your account has been deactivated. Please contact administration.", 403);
+      }
+      throw new AppError(`Your account status is ${user.status}. Access denied.`, 403);
     }
 
     // 3) Check hospital status if linked
-    if (user.hospital && user.hospital.status === "PENDING_APPROVAL") {
-      throw new AppError(
-        `Hospital '${user.hospital.name}' is pending Super Admin approval. Access not granted yet.`,
-        403
-      );
-    }
-
-    if (user.hospital && user.hospital.status === "INACTIVE") {
-      throw new AppError(`Hospital '${user.hospital.name}' subscription is inactive or suspended.`, 403);
+    if (user.hospital && user.hospital.status !== "ACTIVE") {
+      if (user.hospital.status === "PENDING_APPROVAL") {
+        throw new AppError(
+          `Hospital '${user.hospital.name}' is pending Super Admin approval. Access not granted yet.`,
+          403
+        );
+      }
+      if (user.hospital.status === "INACTIVE") {
+        throw new AppError(`Hospital '${user.hospital.name}' subscription is inactive or suspended.`, 403);
+      }
+      throw new AppError(`Hospital '${user.hospital.name}' status is ${user.hospital.status}. Access denied.`, 403);
     }
 
     // 4) Verify password
