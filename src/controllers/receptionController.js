@@ -87,6 +87,7 @@ const getAppointments = asyncHandler(async (req, res) => {
     .sort({ appointmentDate: 1 });
 
   // Auto-seed if empty to make the demo instantly testable
+  // Auto-seed if empty to make the demo instantly testable
   if (appointments.length === 0) {
     const patients = await User.find({ role: "PATIENT", hospital: hospitalId });
     const doctors = await User.find({ role: "DOCTOR", hospital: hospitalId });
@@ -94,12 +95,12 @@ const getAppointments = asyncHandler(async (req, res) => {
     if (patients.length > 0 && doctors.length > 0) {
       const today = new Date();
       const apptData = [
-        { patient: patients[0]._id, doctor: doctors[0]._id, hospital: hospitalId, appointmentDate: today, timeSlot: "09:30 AM", status: "BOOKED", tokenNumber: "T-101", notes: "Regular blood pressure review" },
-        { patient: patients[0]._id, doctor: doctors[0]._id, hospital: hospitalId, appointmentDate: today, timeSlot: "11:00 AM", status: "BOOKED", tokenNumber: "T-102", notes: "Consultation on lab results" }
+        { patient: patients[0]._id, doctor: doctors[0]._id, hospital: hospitalId, appointmentDate: today, timeSlot: "09:30 AM", status: "BOOKED", tokenNumber: "T-101", notes: "Regular blood pressure review", bookingMode: "ONLINE" },
+        { patient: patients[0]._id, doctor: doctors[0]._id, hospital: hospitalId, appointmentDate: today, timeSlot: "11:00 AM", status: "BOOKED", tokenNumber: "T-102", notes: "Consultation on lab results", bookingMode: "WALK_IN" }
       ];
       if (patients.length > 1) {
         const docIndex = doctors.length > 1 ? 1 : 0;
-        apptData.push({ patient: patients[1]._id, doctor: doctors[docIndex]._id, hospital: hospitalId, appointmentDate: today, timeSlot: "02:00 PM", status: "BOOKED", tokenNumber: "T-103", notes: "General health physical checkup" });
+        apptData.push({ patient: patients[1]._id, doctor: doctors[docIndex]._id, hospital: hospitalId, appointmentDate: today, timeSlot: "02:00 PM", status: "BOOKED", tokenNumber: "T-103", notes: "General health physical checkup", bookingMode: "WALK_IN" });
       }
       await Appointment.create(apptData);
       appointments = await Appointment.find({ hospital: hospitalId })
@@ -117,7 +118,7 @@ const getAppointments = asyncHandler(async (req, res) => {
  */
 const bookAppointment = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
-  const { patientId, doctorId, appointmentDate, timeSlot, notes } = req.body;
+  const { patientId, doctorId, appointmentDate, timeSlot, notes, bookingMode } = req.body;
 
   const doctor = await User.findById(doctorId);
   if (!doctor || doctor.role !== "DOCTOR" || doctor.status !== "ACTIVE") {
@@ -150,6 +151,7 @@ const bookAppointment = asyncHandler(async (req, res) => {
     timeSlot,
     tokenNumber,
     notes,
+    bookingMode: bookingMode || "WALK_IN",
     status: "BOOKED"
   });
 
@@ -210,9 +212,10 @@ const getInvoices = asyncHandler(async (req, res) => {
     const doctors = await User.find({ role: "DOCTOR", hospital: hospitalId });
 
     if (patients.length > 0 && doctors.length > 0) {
+      const targetPatientId = req.user.role === "PATIENT" ? req.user._id : patients[0]._id;
       const invData = [
-        { patient: patients[0]._id, doctor: doctors[0]._id, hospital: hospitalId, billAmount: 500, paymentStatus: "PAID", invoiceNumber: `INV-${new Date().getFullYear()}-10001`, paymentMethod: "UPI" },
-        { patient: patients[0]._id, doctor: doctors[0]._id, hospital: hospitalId, billAmount: 500, paymentStatus: "UNPAID", invoiceNumber: `INV-${new Date().getFullYear()}-10002`, paymentMethod: "N/A" }
+        { patient: targetPatientId, doctor: doctors[0]._id, hospital: hospitalId, billAmount: 500, paymentStatus: "PAID", invoiceNumber: `INV-${new Date().getFullYear()}-10001-${targetPatientId.toString().slice(-4)}`, paymentMethod: "UPI" },
+        { patient: targetPatientId, doctor: doctors[0]._id, hospital: hospitalId, billAmount: 500, paymentStatus: "UNPAID", invoiceNumber: `INV-${new Date().getFullYear()}-10002-${targetPatientId.toString().slice(-4)}`, paymentMethod: "N/A" }
       ];
       await Invoice.create(invData);
       invoices = await Invoice.find(query)

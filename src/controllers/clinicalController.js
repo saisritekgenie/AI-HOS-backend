@@ -64,7 +64,11 @@ const getPatientClinicalSummary = asyncHandler(async (req, res) => {
 
   // Fetch patient profile
   const patient = await User.findOne({ _id: patientId, role: "PATIENT", hospital: hospitalId })
-    .populate("assignedDoctor", "firstName lastName");
+    .populate("assignedDoctor", "firstName lastName")
+    .populate({
+      path: "familyMapping.patient",
+      select: "firstName lastName uhid patientId role status mobile"
+    });
   
   if (!patient) {
     throw new AppError("Patient not found or access denied.", 404);
@@ -83,6 +87,23 @@ const getPatientClinicalSummary = asyncHandler(async (req, res) => {
   // Find a test doctor in the same hospital to use as prescriber for the seeded records
   const doctors = await User.find({ role: "DOCTOR", hospital: hospitalId });
   const testDoctorId = doctors.length > 0 ? doctors[0]._id : req.user._id;
+
+  // Auto-seed vitals if none exist
+  if (vitals.length === 0) {
+    const vitalsData = {
+      patient: patientId,
+      hospital: hospitalId,
+      temperature: 98.4,
+      bp: "120/80",
+      heartRate: 72,
+      spo2: 98,
+      respiratoryRate: 16,
+      sugar: 110,
+      recordedBy: testDoctorId
+    };
+    await VitalsRecord.create(vitalsData);
+    vitals = await VitalsRecord.find({ patient: patientId }).sort({ createdAt: -1 }).populate("recordedBy", "firstName lastName");
+  }
 
   // Auto-seed medications if none exist
   if (medications.length === 0) {

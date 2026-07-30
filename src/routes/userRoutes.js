@@ -29,6 +29,14 @@ router
   .post(validateCreateUser, userController.createUser)
   .get(userController.getUsers);
 
+router
+  .route("/check-duplicate")
+  .post(userController.checkDuplicatePatient);
+
+router
+  .route("/merge")
+  .post(userController.mergePatients);
+
 // Route: /api/super-admin/users/:id/enable
 router
   .route("/:id/enable")

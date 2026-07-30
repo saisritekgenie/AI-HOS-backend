@@ -99,6 +99,37 @@ const validateCreateUser = [
     .optional()
     .trim(),
 
+  body("dob")
+    .optional()
+    .custom((val) => {
+      if (val && isNaN(Date.parse(val))) {
+        throw new Error("Invalid date of birth format");
+      }
+      return true;
+    }),
+
+  body("age")
+    .optional()
+    .custom((val) => {
+      if (val !== undefined && val !== null && isNaN(Number(val))) {
+        throw new Error("Age must be a number");
+      }
+      return true;
+    }),
+
+  body("address")
+    .optional()
+    .trim(),
+
+  body("medicalAlerts")
+    .optional(),
+
+  body("insurance")
+    .optional(),
+
+  body("familyMapping")
+    .optional(),
+
   validate,
 ];
 
@@ -160,6 +191,37 @@ const validateUpdateUser = [
   body("profilePhoto")
     .optional()
     .trim(),
+
+  body("dob")
+    .optional()
+    .custom((val) => {
+      if (val && isNaN(Date.parse(val))) {
+        throw new Error("Invalid date of birth format");
+      }
+      return true;
+    }),
+
+  body("age")
+    .optional()
+    .custom((val) => {
+      if (val !== undefined && val !== null && isNaN(Number(val))) {
+        throw new Error("Age must be a number");
+      }
+      return true;
+    }),
+
+  body("address")
+    .optional()
+    .trim(),
+
+  body("medicalAlerts")
+    .optional(),
+
+  body("insurance")
+    .optional(),
+
+  body("familyMapping")
+    .optional(),
 
   validate,
 ];

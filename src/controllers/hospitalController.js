@@ -22,56 +22,70 @@ const registerHospital = asyncHandler(async (req, res) => {
     adminPassword,
   } = req.body;
 
+  const trimmedName = hospitalName ? hospitalName.trim() : "";
+  const trimmedCode = hospitalCode ? hospitalCode.trim().toUpperCase() : "";
+  const trimmedLocation = hospitalLocation ? hospitalLocation.trim() : "";
+  const trimmedEmail = adminEmail ? adminEmail.trim().toLowerCase() : "";
+  const trimmedMobile = adminMobile ? adminMobile.trim() : "";
+  const trimmedFirstName = adminFirstName ? adminFirstName.trim() : "";
+  const trimmedLastName = adminLastName ? adminLastName.trim() : "";
+
   // Check duplicate hospital code
-  const existingHospital = await Hospital.findOne({ code: hospitalCode.toUpperCase() });
+  const existingHospital = await Hospital.findOne({ code: trimmedCode });
   if (existingHospital) {
     throw new AppError("A hospital with this unique code already exists", 409);
   }
 
   // Check duplicate admin email or mobile
-  const existingEmail = await User.findOne({ email: adminEmail });
+  const existingEmail = await User.findOne({ email: trimmedEmail });
   if (existingEmail) {
     throw new AppError("An account with this email address already exists", 409);
   }
 
-  const existingMobile = await User.findOne({ mobile: adminMobile });
+  const existingMobile = await User.findOne({ mobile: trimmedMobile });
   if (existingMobile) {
     throw new AppError("An account with this mobile number already exists", 409);
   }
 
   // 1) Create Hospital with PENDING_APPROVAL status
   const hospital = await Hospital.create({
-    name: hospitalName,
-    code: hospitalCode.toUpperCase(),
-    location: hospitalLocation,
+    name: trimmedName,
+    code: trimmedCode,
+    location: trimmedLocation,
     status: "PENDING_APPROVAL",
   });
 
-  // 2) Create Hospital Admin User with PENDING_APPROVAL status
-  const adminUser = await User.create({
-    firstName: adminFirstName,
-    lastName: adminLastName,
-    email: adminEmail,
-    mobile: adminMobile,
-    password: adminPassword,
-    gender: "OTHER",
-    role: "ADMIN",
-    department: "Executive Management",
-    branch: hospitalLocation,
-    status: "PENDING_APPROVAL",
-    hospital: hospital._id,
-  });
+  try {
+    // 2) Create Hospital Admin User with PENDING_APPROVAL status
+    const adminUser = await User.create({
+      firstName: trimmedFirstName,
+      lastName: trimmedLastName,
+      email: trimmedEmail,
+      mobile: trimmedMobile,
+      password: adminPassword,
+      gender: "OTHER",
+      role: "ADMIN",
+      department: "Executive Management",
+      branch: trimmedLocation,
+      status: "PENDING_APPROVAL",
+      hospital: hospital._id,
+    });
 
-  // Link admin user back to hospital
-  hospital.adminUser = adminUser._id;
-  await hospital.save();
+    // Link admin user back to hospital
+    hospital.adminUser = adminUser._id;
+    await hospital.save();
 
-  return successResponse(
-    res,
-    201,
-    "Hospital registration submitted successfully! Access is pending Super Admin approval.",
-    { hospital, adminUser }
-  );
+    return successResponse(
+      res,
+      201,
+      "Hospital registration submitted successfully! Access is pending Super Admin approval.",
+      { hospital, adminUser }
+    );
+  } catch (err) {
+    // Rollback hospital creation if user creation fails
+    await Hospital.findByIdAndDelete(hospital._id);
+    throw err;
+  }
 });
 
 /**
@@ -107,8 +121,24 @@ const approveHospital = asyncHandler(async (req, res) => {
   await hospital.save();
 
   // Activate Hospital Admin account
-  if (hospital.adminUser) {
-    await User.findByIdAndUpdate(hospital.adminUser, { status: "ACTIVE" });
+  let adminUserId = hospital.adminUser;
+  if (!adminUserId) {
+    const admin = await User.findOne({ hospital: hospital._id, role: "ADMIN" });
+    if (admin) {
+      adminUserId = admin._id;
+      // Self-heal the database record link
+      hospital.adminUser = admin._id;
+      await hospital.save();
+    }
+  }
+
+  if (adminUserId) {
+    const updatedUser = await User.findByIdAndUpdate(adminUserId, { status: "ACTIVE" }, { new: true });
+    if (!updatedUser) {
+      throw new AppError("Hospital admin user record not found", 404);
+    }
+  } else {
+    throw new AppError("This hospital does not have an associated admin user account.", 400);
   }
 
   // Log Audit
