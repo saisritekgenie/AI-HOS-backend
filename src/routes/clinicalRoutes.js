@@ -8,6 +8,7 @@ router.use(protect);
 
 // Allow patient role to fetch their own clinical records summary
 router.get("/patient/:patientId", clinicalController.getPatientClinicalSummary);
+router.get("/patient/:patientId/consolidated-report", clinicalController.getConsolidatedReport);
 
 // Staff restricted clinical endpoints
 router.use(
@@ -55,5 +56,17 @@ router.put("/labs/:id/collect", clinicalController.collectLabSample);
 router.get("/labs", clinicalController.getLabRequests);
 router.put("/labs/:id/status", clinicalController.updateLabStatus);
 router.put("/labs/:id/complete", clinicalController.completeLabTest);
+
+// Appointments scheduling workflows
+router.post("/appointments", clinicalController.createAppointment);
+router.get("/appointments", clinicalController.getAppointments);
+router.put("/appointments/:id/checkin", clinicalController.checkInAppointment);
+
+// Patient discharge workflows
+router.post("/patient/:patientId/discharge", clinicalController.dischargePatient);
+router.get("/patient/:patientId/discharge", clinicalController.getDischargeRecord);
+
+// Lab Report AI OCR parsing
+router.post("/labs/:id/ocr", clinicalController.parseLabReportOCR);
 
 module.exports = router;

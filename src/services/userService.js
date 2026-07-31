@@ -1,5 +1,6 @@
 const User = require("../models/userModel");
 const AppError = require("../utils/appError");
+const { hashText } = require("../utils/encryption");
 
 class UserService {
   /**
@@ -27,13 +28,13 @@ class UserService {
     }
 
     // Check if email already exists
-    const existingEmail = await User.findOne({ email });
+    const existingEmail = await User.findOne({ emailHash: hashText(email) });
     if (existingEmail) {
       throw new AppError("A user with this email address already exists", 409);
     }
 
     // Check if mobile already exists
-    const existingMobile = await User.findOne({ mobile });
+    const existingMobile = await User.findOne({ mobileHash: hashText(mobile) });
     if (existingMobile) {
       throw new AppError("A user with this mobile number already exists", 409);
     }
@@ -197,14 +198,14 @@ class UserService {
     }
 
     if (updateData.email && updateData.email !== user.email) {
-      const existingEmail = await User.findOne({ email: updateData.email });
+      const existingEmail = await User.findOne({ emailHash: hashText(updateData.email) });
       if (existingEmail) {
         throw new AppError("A user with this email address already exists", 409);
       }
     }
 
     if (updateData.mobile && updateData.mobile !== user.mobile) {
-      const existingMobile = await User.findOne({ mobile: updateData.mobile });
+      const existingMobile = await User.findOne({ mobileHash: hashText(updateData.mobile) });
       if (existingMobile) {
         throw new AppError("A user with this mobile number already exists", 409);
       }

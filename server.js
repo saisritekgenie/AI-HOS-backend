@@ -4,6 +4,17 @@ dns.setServers(["1.1.1.1", "8.8.8.8"]);
 const dotenv = require("dotenv");
 dotenv.config();
 
+// Ensure critical environment security variables are present
+if (!process.env.JWT_SECRET) {
+  console.error("❌ CRITICAL SETUP ERROR: JWT_SECRET environment variable is missing!");
+  process.exit(1);
+}
+if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length !== 32) {
+  console.error("❌ CRITICAL SETUP ERROR: ENCRYPTION_KEY must be defined in env and must be exactly 32 characters long!");
+  process.exit(1);
+}
+
+
 const http = require("http");
 const socketio = require("socket.io");
 const app = require("./src/app");
