@@ -21,7 +21,7 @@ const protect = asyncHandler(async (req, res, next) => {
 
   // 3) Verify token signature & expiration
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "super_secret_jwt_key_ai_hospital_2026");
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
 
     if (!user) {

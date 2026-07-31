@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
+const { encryptText, decryptText, hashText } = require("../utils/encryption");
 
 const userSchema = new mongoose.Schema(
   {
@@ -23,20 +24,25 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: [true, "First name is required"],
       trim: true,
-      maxlength: [50, "First name cannot exceed 50 characters"],
+      maxlength: [200, "First name cannot exceed 200 characters"],
+      get: decryptText,
+      set: encryptText
     },
     lastName: {
       type: String,
       required: [true, "Last name is required"],
       trim: true,
-      maxlength: [50, "Last name cannot exceed 50 characters"],
+      maxlength: [200, "Last name cannot exceed 200 characters"],
+      get: decryptText,
+      set: encryptText
     },
     mobile: {
       type: String,
       required: [true, "Mobile number is required"],
       unique: true,
       trim: true,
-      match: [/^[0-9]{10}$/, "Mobile number must be exactly 10 digits"],
+      get: decryptText,
+      set: encryptText
     },
     email: {
       type: String,
@@ -44,7 +50,16 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
       trim: true,
-      match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, "Please provide a valid email address"],
+      get: decryptText,
+      set: encryptText
+    },
+    emailHash: {
+      type: String,
+      index: true
+    },
+    mobileHash: {
+      type: String,
+      index: true
     },
     password: {
       type: String,
@@ -141,6 +156,8 @@ const userSchema = new mongoose.Schema(
     allergies: {
       type: [String],
       default: [],
+      get: (arr) => (arr || []).map(decryptText),
+      set: (arr) => (arr || []).map(encryptText)
     },
     vaccinations: {
       type: [String],
@@ -149,6 +166,8 @@ const userSchema = new mongoose.Schema(
     chronicDiseases: {
       type: [String],
       default: [],
+      get: (arr) => (arr || []).map(decryptText),
+      set: (arr) => (arr || []).map(encryptText)
     },
     documents: [
       {
@@ -187,16 +206,30 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { getters: true },
+    toObject: { getters: true }
   }
 );
 
-// Encrypt password using bcrypt before saving document
+// Pre-save hook: Hash search terms (email, mobile) and hash passwords
 userSchema.pre("save", async function () {
+  if (this.isModified("email") && this.email) {
+    this.emailHash = hashText(decryptText(this.email));
+  }
+  if (this.isModified("mobile") && this.mobile) {
+    this.mobileHash = hashText(decryptText(this.mobile));
+  }
+
   if (!this.isModified("password")) {
     return;
   }
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+  } catch (err) {
+    throw err;
+  }
 });
 
 // Compare user entered password with hashed password in database

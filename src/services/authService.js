@@ -2,6 +2,7 @@ const User = require("../models/userModel");
 const Hospital = require("../models/hospitalModel");
 const AppError = require("../utils/appError");
 const generateToken = require("../utils/generateToken");
+const { hashText } = require("../utils/encryption");
 
 class AuthService {
   /**
@@ -11,7 +12,16 @@ class AuthService {
    */
   async login(email, password) {
     // 1) Find user by email (select password field) and populate hospital
-    const user = await User.findOne({ email }).select("+password").populate("hospital");
+    let user = await User.findOne({ emailHash: hashText(email) }).select("+password").populate("hospital");
+    
+    // Fallback for legacy database accounts (bypassing Mongoose setters to find raw plaintext)
+    if (!user) {
+      const rawUser = await User.collection.findOne({ email: email.trim().toLowerCase() });
+      if (rawUser) {
+        user = await User.findById(rawUser._id).select("+password").populate("hospital");
+      }
+    }
+
     if (!user) {
       throw new AppError("Invalid email or password", 401);
     }
@@ -50,6 +60,15 @@ class AuthService {
       throw new AppError("Invalid email or password", 401);
     }
 
+    // Dynamic database hash upgrade migration
+    if (!user.emailHash) {
+      user.email = user.email; // triggers pre-save setter hashing
+      if (user.mobile) {
+        user.mobile = user.mobile;
+      }
+      await user.save();
+    }
+
     // 5) Generate token
     const token = generateToken(user._id, user.role);
 
@@ -69,11 +88,29 @@ class AuthService {
       throw new AppError("Please provide both Patient ID (UHID) and registered Mobile number", 400);
     }
 
-    const patient = await User.findOne({ 
+    let patient = await User.findOne({ 
       uhid: uhid.trim(), 
-      mobile: mobile.trim(), 
+      mobileHash: hashText(mobile), 
       role: "PATIENT" 
     }).populate("hospital");
+
+    if (!patient) {
+      // Fallback for legacy patient logins (bypassing Mongoose setters for raw mobile check)
+      const rawPatient = await User.collection.findOne({
+        uhid: uhid.trim(),
+        mobile: mobile.trim(),
+        role: "PATIENT"
+      });
+
+      if (rawPatient) {
+        patient = await User.findById(rawPatient._id).populate("hospital");
+        if (patient) {
+          // Upgrade mobile hash dynamically
+          patient.mobile = patient.mobile;
+          await patient.save();
+        }
+      }
+    }
 
     if (!patient) {
       throw new AppError("Invalid Patient ID or Mobile number. Please check your inputs.", 401);

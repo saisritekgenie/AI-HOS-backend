@@ -4,6 +4,7 @@ const auditLogService = require("../services/auditLogService");
 const AppError = require("../utils/appError");
 const asyncHandler = require("../utils/asyncHandler");
 const { successResponse } = require("../utils/apiResponse");
+const { hashText } = require("../utils/encryption");
 
 /**
  * @desc    Register a new Hospital & Hospital Admin (Pending Super Admin Approval)
@@ -37,12 +38,12 @@ const registerHospital = asyncHandler(async (req, res) => {
   }
 
   // Check duplicate admin email or mobile
-  const existingEmail = await User.findOne({ email: trimmedEmail });
+  const existingEmail = await User.findOne({ emailHash: hashText(trimmedEmail) });
   if (existingEmail) {
     throw new AppError("An account with this email address already exists", 409);
   }
 
-  const existingMobile = await User.findOne({ mobile: trimmedMobile });
+  const existingMobile = await User.findOne({ mobileHash: hashText(trimmedMobile) });
   if (existingMobile) {
     throw new AppError("An account with this mobile number already exists", 409);
   }

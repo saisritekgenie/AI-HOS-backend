@@ -1,8 +1,52 @@
 class BaseAIService {
   /**
+   * Helper to scrub PHI from text prompts (emails, phone numbers)
+   * @param {string} text - Raw input prompt text
+   * @returns {string} - Clean scrubbed prompt text
+   */
+  scrubPrompt(text) {
+    if (!text || typeof text !== "string") return text;
+
+    let scrubbed = text;
+    // Mask email addresses
+    scrubbed = scrubbed.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, "[EMAIL_MASKED]");
+    // Mask 10-digit phone numbers
+    scrubbed = scrubbed.replace(/\b\d{10}\b/g, "[MOBILE_MASKED]");
+    
+    return scrubbed;
+  }
+
+  /**
+   * Helper to scrub specific patient name references from prompts
+   * @param {string} text - Raw input prompt text
+   * @param {object} patient - Patient profile containing firstName and lastName
+   * @returns {string} - Clean scrubbed prompt text
+   */
+  scrubPatientData(text, patient) {
+    if (!text || typeof text !== "string") return text;
+    
+    let scrubbed = this.scrubPrompt(text);
+    if (patient) {
+      if (patient.firstName) {
+        const regex = new RegExp(patient.firstName, "gi");
+        scrubbed = scrubbed.replace(regex, "[PATIENT_FIRST_NAME]");
+      }
+      if (patient.lastName) {
+        const regex = new RegExp(patient.lastName, "gi");
+        scrubbed = scrubbed.replace(regex, "[PATIENT_LAST_NAME]");
+      }
+    }
+    return scrubbed;
+  }
+
+  /**
    * Helper to perform actual LLM API call if keys are present
    */
   async callLLM(systemPrompt, userPrompt) {
+    // Audit & Scrub PHI before sending external requests
+    const cleanSystemPrompt = this.scrubPrompt(systemPrompt);
+    const cleanUserPrompt = this.scrubPrompt(userPrompt);
+
     const geminiKey = process.env.GEMINI_API_KEY;
     const openAIKey = process.env.OPENAI_API_KEY;
 
@@ -14,7 +58,7 @@ class BaseAIService {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{
-              parts: [{ text: `${systemPrompt}\n\nUser Input Context:\n${userPrompt}` }]
+              parts: [{ text: `${cleanSystemPrompt}\n\nUser Input Context:\n${cleanUserPrompt}` }]
             }]
           })
         });
@@ -37,8 +81,8 @@ class BaseAIService {
           body: JSON.stringify({
             model: "gpt-4o-mini",
             messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt }
+              { role: "system", content: cleanSystemPrompt },
+              { role: "user", content: cleanUserPrompt }
             ]
           })
         });

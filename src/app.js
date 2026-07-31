@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const hospitalRoutes = require("./routes/hospitalRoutes");
@@ -30,7 +32,35 @@ dotenv.config();
 const app = express();
 
 // Global Middlewares
+app.use(helmet());
 app.use(cors());
+
+// Configure global rate limiter
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests from this IP. Please try again after 15 minutes."
+  }
+});
+app.use(limiter);
+
+// Specific rate limit for AI routes (expensive calls)
+const aiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 15, // Limit each IP to 15 requests per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many AI requests. Please wait a minute before requesting assistance."
+  }
+});
+app.use("/api/ai", aiLimiter);
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 

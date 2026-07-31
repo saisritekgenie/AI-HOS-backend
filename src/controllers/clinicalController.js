@@ -1,5 +1,6 @@
 const User = require("../models/userModel");
-const { VitalsRecord, MedicationRecord, DoctorInstruction, NursingNote, LabRequest, Consultation } = require("../models/clinicalModel");
+const { VitalsRecord, MedicationRecord, DoctorInstruction, NursingNote, LabRequest, Consultation, DischargeRecord } = require("../models/clinicalModel");
+const { Appointment, Invoice } = require("../models/receptionModel");
 const auditLogService = require("../services/auditLogService");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/appError");
@@ -73,6 +74,15 @@ const getPatientClinicalSummary = asyncHandler(async (req, res) => {
   if (!patient) {
     throw new AppError("Patient not found or access denied.", 404);
   }
+
+  // HIPAA Compliance: Log EMR read access activity in background
+  await auditLogService.logActivity(req, {
+    module: "CLINICAL",
+    action: "EMR_READ",
+    details: `Accessed EMR clinical summary records for Patient ID: ${patientId}`,
+    targetId: patientId,
+    targetName: `${patient.firstName} ${patient.lastName}`
+  });
 
   // Fetch all clinical records
   let [vitals, medications, instructions, notes, labs, consultations] = await Promise.all([
@@ -579,6 +589,223 @@ const addPatientDocument = asyncHandler(async (req, res) => {
   return successResponse(res, 200, "Document uploaded successfully", patient);
 });
 
+/**
+ * Create a new Patient Appointment
+ */
+const createAppointment = asyncHandler(async (req, res) => {
+  const hospitalId = req.user.hospital;
+  const { patientId, doctorId, appointmentDate, timeSlot } = req.body;
+
+  const appt = await Appointment.create({
+    patient: patientId,
+    doctor: doctorId,
+    hospital: hospitalId,
+    appointmentDate: new Date(appointmentDate),
+    timeSlot,
+    status: "BOOKED"
+  });
+
+  await auditLogService.logActivity(req, {
+    module: "CLINICAL",
+    action: "CREATE_APPOINTMENT",
+    details: `Scheduled appointment for Patient ID ${patientId} with Doctor ID ${doctorId} on slot ${timeSlot}`,
+    targetId: appt._id.toString()
+  });
+
+  return successResponse(res, 201, "Appointment scheduled successfully", appt);
+});
+
+/**
+ * Get appointments list filtered by doctor, patient, or date
+ */
+const getAppointments = asyncHandler(async (req, res) => {
+  const hospitalId = req.user.hospital;
+  const query = { hospital: hospitalId };
+
+  if (req.query.doctor) query.doctor = req.query.doctor;
+  if (req.query.patient) query.patient = req.query.patient;
+  if (req.query.status) query.status = req.query.status;
+
+  const appointments = await Appointment.find(query)
+    .populate("patient", "firstName lastName uhid mobile")
+    .populate("doctor", "firstName lastName")
+    .sort({ appointmentDate: 1, timeSlot: 1 });
+
+  return successResponse(res, 200, "Appointments retrieved successfully", appointments);
+});
+
+/**
+ * Check in a patient for their scheduled appointment
+ */
+const checkInAppointment = asyncHandler(async (req, res) => {
+  const hospitalId = req.user.hospital;
+  const apptId = req.params.id;
+
+  const appt = await Appointment.findOne({ _id: apptId, hospital: hospitalId });
+  if (!appt) {
+    throw new AppError("Appointment record not found.", 404);
+  }
+
+  appt.status = "CHECKED_IN";
+  await appt.save();
+
+  await auditLogService.logActivity(req, {
+    module: "CLINICAL",
+    action: "CHECKIN_APPOINTMENT",
+    details: `Patient checked in for appointment ID ${apptId}`,
+    targetId: apptId
+  });
+
+  return successResponse(res, 200, "Patient checked in successfully", appt);
+});
+
+/**
+ * Submit a patient discharge record (verifies billing clearance first)
+ */
+const dischargePatient = asyncHandler(async (req, res) => {
+  const patientId = req.params.patientId;
+  const hospitalId = req.user.hospital;
+  const { dischargeSummary, takeHomeMedications } = req.body;
+
+  // 1) Verify patient exists
+  const patient = await User.findOne({ _id: patientId, role: "PATIENT", hospital: hospitalId });
+  if (!patient) {
+    throw new AppError("Patient not found or access denied.", 404);
+  }
+
+  // 2) Check if patient has any outstanding bills
+  const { BillingInvoice } = require("../models/billingModel");
+  const unpaidInvoice = await BillingInvoice.findOne({ 
+    patient: patientId, 
+    hospital: hospitalId, 
+    status: { $in: ["UNPAID", "PARTIALLY_PAID"] } 
+  });
+
+  let billingCleared = true;
+  if (unpaidInvoice) {
+    billingCleared = false;
+  }
+
+  const discharge = await DischargeRecord.create({
+    patient: patientId,
+    hospital: hospitalId,
+    doctor: req.user._id,
+    dischargeSummary,
+    billingCleared,
+    takeHomeMedications: takeHomeMedications || [],
+    dischargedAt: new Date()
+  });
+
+  if (billingCleared) {
+    patient.roomNo = "N/A";
+    patient.bedNo = "N/A";
+    await patient.save();
+  }
+
+  await auditLogService.logActivity(req, {
+    module: "CLINICAL",
+    action: "DISCHARGE_PATIENT",
+    details: `Discharged Patient ID ${patientId}. Billing Cleared: ${billingCleared}`,
+    targetId: discharge._id.toString(),
+    targetName: `${patient.firstName} ${patient.lastName}`
+  });
+
+  return successResponse(res, 201, "Discharge record created successfully", { discharge, billingCleared });
+});
+
+/**
+ * Get patient discharge status summary
+ */
+const getDischargeRecord = asyncHandler(async (req, res) => {
+  const patientId = req.params.patientId;
+  const hospitalId = req.user.hospital;
+
+  const record = await DischargeRecord.findOne({ patient: patientId, hospital: hospitalId })
+    .populate("doctor", "firstName lastName")
+    .sort({ createdAt: -1 });
+
+  return successResponse(res, 200, "Patient discharge record retrieved", record);
+});
+
+/**
+ * Run OCR parse on a simulated laboratory report sheet
+ */
+const parseLabReportOCR = asyncHandler(async (req, res) => {
+  const labId = req.params.id;
+  const hospitalId = req.user.hospital;
+  const { reportText } = req.body;
+
+  if (!reportText) {
+    throw new AppError("Lab report text payload is required for OCR parsing.", 400);
+  }
+
+  const lab = await LabRequest.findOne({ _id: labId, hospital: hospitalId });
+  if (!lab) {
+    throw new AppError("Lab request record not found.", 404);
+  }
+
+  // Use baseAIService to parse text content using the LLM
+  const baseAIServiceClass = require("../services/ai/baseAIService");
+  const aiService = new baseAIServiceClass();
+  const parsedResults = await aiService.callLLM(
+    "You are a clinical OCR Laboratory parser. Extract diagnostic parameters, metrics, or test values from this raw text string. Return a short 1-sentence summary of findings. Output text only.",
+    reportText
+  );
+
+  const resultsSummary = parsedResults || "Diagnostic markers parsed: " + reportText.substring(0, 50) + "...";
+
+  lab.results = resultsSummary;
+  lab.status = "COMPLETED";
+  await lab.save();
+
+  await auditLogService.logActivity(req, {
+    module: "CLINICAL",
+    action: "LAB_OCR_PARSE",
+    details: `Performed AI OCR on lab report for test: ${lab.testName}`,
+    targetId: labId
+  });
+
+  return successResponse(res, 200, "Lab report parsed via OCR successfully", lab);
+});
+
+/**
+ * Compile a Patient's entire EMR health record dossier
+ */
+const getConsolidatedReport = asyncHandler(async (req, res) => {
+  const { patientId } = req.params;
+
+  const patient = await User.findById(patientId).populate("hospital");
+  if (!patient) {
+    throw new AppError("Patient profile not found", 404);
+  }
+
+  // Fetch all clinical records in parallel
+  const [consultations, vitals, labs, invoices, discharge] = await Promise.all([
+    Consultation.find({ patient: patientId }).populate("doctor", "firstName lastName").sort({ createdAt: -1 }),
+    VitalsRecord.find({ patient: patientId }).sort({ recordedAt: -1 }),
+    LabRequest.find({ patient: patientId }).populate("prescribedBy sampleCollectedBy", "firstName lastName").sort({ createdAt: -1 }),
+    Invoice.find({ patient: patientId }).sort({ createdAt: -1 }),
+    DischargeRecord.findOne({ patient: patientId }).populate("doctor", "firstName lastName")
+  ]);
+
+  // Log EMR access for audit compliance
+  await auditLogService.logActivity(req, {
+    module: "CLINICAL",
+    action: "EMR_READ",
+    details: `Exported consolidated EMR health record report for Patient: ${patient.firstName} ${patient.lastName} (UHID: ${patient.uhid})`,
+    targetId: patientId
+  });
+
+  return successResponse(res, 200, "Consolidated health report compiled successfully", {
+    patient,
+    consultations,
+    vitals,
+    labs,
+    invoices,
+    discharge
+  });
+});
+
 module.exports = {
   getDashboardStats,
   getPatientClinicalSummary,
@@ -600,4 +827,11 @@ module.exports = {
   completeLabTest,
   updatePatientClinicalTags,
   addPatientDocument,
+  createAppointment,
+  getAppointments,
+  checkInAppointment,
+  dischargePatient,
+  getDischargeRecord,
+  parseLabReportOCR,
+  getConsolidatedReport,
 };
