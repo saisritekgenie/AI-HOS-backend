@@ -124,12 +124,22 @@ class NurseAIService extends BaseAIService {
       };
     }
 
-    if (activeTab === "patients") {
-      return {
-        reply: "Patient Care Ward logs: Ensure all warded patients have their daily EMR files updated and vital logs generated.",
-        keyTakeaways: ["Check for chronic diseases tags.", "Check patient details bands before administering drugs."],
-        recommendations: ["Open charting drawer to update vitals.", "Consult doctor if clinical concerns arise."]
-      };
+    if (activeTab === "patients" || lower.includes("patient") || lower.includes("list")) {
+      try {
+        const patients = await User.find({ role: "PATIENT", hospital: hospitalId });
+        const listStr = patients.map(p => `${p.firstName} ${p.lastName} (Room: ${p.roomNo || "N/A"}, Bed: ${p.bedNo || "N/A"})`).join(", ");
+        return {
+          reply: `Patient Care Ward Logs: We have ${patients.length} warded patients. Live Patient List: ${listStr || "None warded."}`,
+          keyTakeaways: ["Check for chronic diseases tags.", "Check patient details bands before administering drugs."],
+          recommendations: ["Open charting drawer to update vitals.", "Consult doctor if clinical concerns arise."]
+        };
+      } catch (e) {
+        return {
+          reply: "Patient Care Ward logs: Ensure all warded patients have their daily EMR files updated and vital logs generated.",
+          keyTakeaways: ["Check for chronic diseases tags.", "Check patient details bands before administering drugs."],
+          recommendations: ["Open charting drawer to update vitals.", "Consult doctor if clinical concerns arise."]
+        };
+      }
     }
 
     return {
