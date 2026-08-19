@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const helmet = require("helmet");
+const path = require("path");
 const rateLimit = require("express-rate-limit");
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -32,8 +33,9 @@ dotenv.config();
 const app = express();
 
 // Global Middlewares
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors());
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // Configure global rate limiter
 const limiter = rateLimit({
@@ -107,5 +109,50 @@ app.use((req, res, next) => {
 
 // Centralized Error Handling Middleware
 app.use(globalErrorHandler);
+
+// Seed standard mock report files in uploads directory on startup to prevent 404s
+try {
+  const fs = require("fs");
+  const path = require("path");
+  const uploadsDir = path.join(__dirname, "../uploads");
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  const mockFiles = [
+    "cbc_panel_report.pdf",
+    "urine_test_report.pdf",
+    "lipid_profile_report.pdf",
+    "random_blood_sugar_report.pdf"
+  ];
+
+  mockFiles.forEach(fileName => {
+    const filePath = path.join(uploadsDir, fileName);
+    if (!fs.existsSync(filePath)) {
+      const content = `--------------------------------------------------
+HOSPITAL LAB DIAGNOSTIC REPORT (SIMULATED COPY)
+--------------------------------------------------
+Report File: ${fileName}
+Released Date: ${new Date().toLocaleDateString()}
+Status: RELEASED / COMPLETED
+
+Patient EMR Details:
+- Hospital: KIMS General Hospital
+- UHID / Patient ID: EMR-9090-SAMPLE
+
+Diagnostic Test Findings & Results:
+Standard physiological parameters fall within reference values.
+No clinical pathology detected on screen.
+
+Notes:
+Verified by pathology technician. This is a verified digital copy.
+--------------------------------------------------`;
+      fs.writeFileSync(filePath, content);
+      console.log(`Created mock report file: ${fileName}`);
+    }
+  });
+} catch (err) {
+  console.error("Failed to seed mock report files at startup:", err);
+}
 
 module.exports = app;

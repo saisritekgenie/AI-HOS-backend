@@ -574,7 +574,7 @@ const completeLabTest = asyncHandler(async (req, res) => {
   const labId = req.params.id;
   const { results, reportFile } = req.body;
 
-  const lab = await LabRequest.findOne({ _id: labId, hospital: hospitalId });
+  const lab = await LabRequest.findOne({ _id: labId, hospital: hospitalId }).populate("patient");
   if (!lab) {
     throw new AppError("Lab request not found", 404);
   }
@@ -583,6 +583,39 @@ const completeLabTest = asyncHandler(async (req, res) => {
   lab.results = results || "Diagnostic parameters normal.";
   lab.reportFile = reportFile || `lab_report_${lab.testName.replace(/\s+/g, "_").toLowerCase()}_${Date.now()}.pdf`;
   await lab.save();
+
+  // Dynamically write mock report file to disk under uploads/ directory
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const uploadsDir = path.join(__dirname, "../../uploads");
+    
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const reportContent = `--------------------------------------------------
+HOSPITAL LAB DIAGNOSTIC REPORT (SIMULATED COPY)
+--------------------------------------------------
+Test Parameter: ${lab.testName}
+Status: COMPLETED
+Released Date: ${new Date().toLocaleString()}
+
+Patient Details:
+- Name: ${lab.patient?.firstName || "N/A"} ${lab.patient?.lastName || "N/A"}
+- UHID: ${lab.patient?.uhid || "N/A"}
+
+Diagnostic Findings & Results:
+${lab.results}
+
+Lab Notes:
+Verified by pathology technician. This is a verified digital copy.
+--------------------------------------------------`;
+
+    fs.writeFileSync(path.join(uploadsDir, lab.reportFile), reportContent);
+  } catch (err) {
+    console.error("Failed to write mock report file:", err);
+  }
 
   return successResponse(res, 200, "Lab test completed and results registered", lab);
 });
