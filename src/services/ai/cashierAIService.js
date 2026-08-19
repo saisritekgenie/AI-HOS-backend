@@ -28,17 +28,37 @@ class CashierAIService extends BaseAIService {
     };
   }
 
-  async processChat(content, hospitalId) {
+  async processChat(content, hospitalId, activeTab) {
+    const lower = content.toLowerCase();
+
+    // 1. Gather context data based on activeTab
+    let tabContext = "";
+    try {
+      if (activeTab === "billing") {
+        const unpaidCount = await BillingInvoice.countDocuments({ paymentStatus: "UNPAID", hospital: hospitalId });
+        const paidCount = await BillingInvoice.countDocuments({ paymentStatus: "PAID", hospital: hospitalId });
+        tabContext = `Active Dashboard page: Billing. Unpaid invoices count: ${unpaidCount}. Paid invoices count: ${paidCount}.`;
+      } else {
+        tabContext = `Active Dashboard page: Cashier Overview.`;
+      }
+    } catch (err) {
+      console.error("Error fetching cashier tab context:", err);
+      tabContext = `Active Dashboard page: ${activeTab}. Context fetch failed.`;
+    }
+
     if (this.isGreeting(content)) {
       return {
-        reply: "Hello! I am your AI Billing Assistant. I can help you analyze revenue logs, check outstanding balances, compose payment reminders, or review transaction channels. How can I help you today?",
-        keyTakeaways: ["I assist with billing analytics and cash collection coordination."],
-        recommendations: ["Check current cashier insights, draft pending payment reminders, or review invoice channels."]
+        reply: `Hello! I am your AI Billing Assistant. Currently assisting you on the ${activeTab || "billing"} dashboard. I can check outstanding balances, compose payment reminders, or run revenue summary checks. How can I help you today?`,
+        keyTakeaways: ["AI is integrated with billing active tab context."],
+        recommendations: ["Query pending payment reminders or daily collections."]
       };
     }
 
-    const userPrompt = `Input: ${content}`;
-    const systemPrompt = "You are the Hospital Billing & Cashier AI Assistant. Answer questions regarding settled revenue, payment channels, invoice drafts, and balances. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
+    // Retrieve global database context
+    const dbContext = await this.getHospitalDatabaseContext(hospitalId, content);
+
+    const userPrompt = `Dashboard Context: ${tabContext}\n\nLive Database Context:\n${dbContext}\n\nUser Request: ${content}`;
+    const systemPrompt = "You are the Hospital Billing & Cashier AI Assistant. Answer questions regarding settled revenue, payment channels, invoice drafts, patient balances, or warded/outpatient bills using the provided Live Database Context and Dashboard Context. Be extremely specific, reference actual patient names and exact billing amounts from the context. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
 
     const llmResult = await this.callLLM(systemPrompt, userPrompt);
     if (llmResult) {
@@ -48,18 +68,16 @@ class CashierAIService extends BaseAIService {
     }
 
     // Local Fallback
-    const lower = content.toLowerCase();
-    if (lower.includes("revenue") || lower.includes("settled") || lower.includes("sales") || lower.includes("total")) {
-      const insights = await this.getCashierInsights(hospitalId);
+    const insights = await this.getCashierInsights(hospitalId);
+    if (activeTab === "billing" || lower.includes("revenue") || lower.includes("settled") || lower.includes("sales") || lower.includes("total")) {
       return {
-        reply: `Here are the latest cashier analytics: ${insights.revenueSummary}`,
+        reply: `Here are the latest cashier analytics: ${insights.revenueSummary}. Current billing channel statistics show UPI and card payments are clearing normally.`,
         keyTakeaways: [insights.revenueInsights, "Cash settlement logs verify standard daily settlement balance."],
         recommendations: ["Check invoice lists in billing portal for older balances.", "Clear ledger accounts before closing shift."]
       };
     }
 
     if (lower.includes("reminder") || lower.includes("unpaid") || lower.includes("sms")) {
-      const insights = await this.getCashierInsights(hospitalId);
       const list = insights.pendingReminders.map(r => `₹${r.amount} for patient ${r.patientName}`).join("; ");
       return {
         reply: `Pending payment collections include: ${list || "No pending reminders."}`,

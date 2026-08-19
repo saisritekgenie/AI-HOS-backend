@@ -21,8 +21,8 @@ const getQueueOptimization = asyncHandler(async (req, res) => {
 
 const chat = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
-  const { content } = req.body;
-  const reply = await receptionistAIService.processChat(content, hospitalId);
+  const { content, activeTab } = req.body;
+  const reply = await receptionistAIService.processChat(content, hospitalId, activeTab);
   return successResponse(res, 200, "AI Receptionist response compiled", reply);
 });
 

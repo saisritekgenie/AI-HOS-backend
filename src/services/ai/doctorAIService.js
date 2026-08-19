@@ -210,17 +210,52 @@ class DoctorAIService extends BaseAIService {
     };
   }
 
-  async processChat(content, doctorId) {
+  async processChat(content, doctorId, activeTab) {
+    const User = require("../../models/userModel");
+    const { Appointment, AdmissionRecord } = require("../../models/receptionModel");
+    const { LabRequest, VitalsRecord, Consultation } = require("../../models/clinicalModel");
+
+    const lower = content.toLowerCase();
+
+    // Fetch doctor document to get hospital ID
+    const doctorDoc = await User.findById(doctorId);
+    const hospitalId = doctorDoc?.hospital;
+
+    // 1. Gather context data based on activeTab
+    let tabContext = "";
+    try {
+      if (activeTab === "patients") {
+        const patients = await User.find({ role: "PATIENT", assignedDoctor: doctorId }).limit(5);
+        tabContext = `Active Dashboard page: Patient Management. Your assigned patients: ${patients.map(p => `${p.firstName} ${p.lastName} (${p.uhid})`).join(", ") || "None"}.`;
+      } else if (activeTab === "appointments") {
+        const appointments = await Appointment.find({ doctor: doctorId }).populate("patient", "firstName lastName").limit(5);
+        tabContext = `Active Dashboard page: Appointments. Scheduled consultations: ${appointments.map(a => `${a.patient?.firstName} ${a.patient?.lastName} at ${a.timeSlot} (${a.status})`).join(", ") || "None"}.`;
+      } else if (activeTab === "labs") {
+        const labs = await LabRequest.find({ prescribedBy: doctorId }).populate("patient", "firstName lastName").limit(5);
+        tabContext = `Active Dashboard page: Labs. Prescribed tests: ${labs.map(l => `${l.testName} for ${l.patient?.firstName} ${l.patient?.lastName} (${l.status})`).join(", ") || "None"}.`;
+      } else if (activeTab === "admissions") {
+        const admissions = await AdmissionRecord.find({ hospital: hospitalId }).populate("patient", "firstName lastName").limit(5);
+        tabContext = `Active Dashboard page: Admissions. Inpatient beds: ${admissions.map(a => `${a.patient?.firstName} ${a.patient?.lastName} in Bed ${a.bedNo} (${a.status})`).join(", ") || "None"}.`;
+      } else {
+        tabContext = `Active Dashboard page: Doctor Clinical Hub.`;
+      }
+    } catch (err) {
+      tabContext = `Active Dashboard page: ${activeTab}. Doctor clinical mode.`;
+    }
+
     if (this.isGreeting(content)) {
       return {
-        reply: "Hello Doctor! I am your AI Clinical Assistant. I can assist you with patient diagnostic reports, scribe shorthand transcriptions, prescription allergen checks, or differential diagnosis hints. How can I help you today?",
-        keyTakeaways: ["Clinical AI aids diagnosis but all orders require physician confirmation."],
-        recommendations: ["Query patient summary logs, check prescription combinations, or dictate clinical notes."]
+        reply: `Hello Doctor! I am your AI Clinical Assistant. Currently assisting you on the ${activeTab || "clinical"} dashboard. I can check today's appointments, patients in the waiting queue, critical vital alerts, pending lab reports, or summarize a patient's medical history. How can I help you today?`,
+        keyTakeaways: ["Clinical AI is connected directly to MongoDB EMR logs."],
+        recommendations: ["Ask 'Show my appointments today' or 'Show my critical patients'."]
       };
     }
 
-    const userPrompt = `Input: ${content}`;
-    const systemPrompt = "You are the Doctor's Clinical AI Assistant. Assist the physician with diagnosis options, shorthand reviews, and safety queries. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
+    // Retrieve global hospital database context
+    const dbContext = await this.getHospitalDatabaseContext(hospitalId, content);
+
+    const userPrompt = `Dashboard Context: ${tabContext}\n\nLive Database Context:\n${dbContext}\n\nUser Request: ${content}`;
+    const systemPrompt = "You are a senior physician's diagnostic and clinical AI. Formulate clinical suggestions, diagnostic checks, check scheduler status, or retrieve patient history using the provided Live Database Context and Dashboard Context. Be extremely specific, reference exact patients, vitals, prescriptions, or bills from the context when answering. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
 
     const llmResult = await this.callLLM(systemPrompt, userPrompt);
     if (llmResult) {
@@ -229,29 +264,149 @@ class DoctorAIService extends BaseAIService {
       } catch (e) {}
     }
 
-    // Local Fallback
-    const lower = content.toLowerCase();
-    if (lower.includes("vitals") || lower.includes("diagnosis") || lower.includes("complaint")) {
-      const suggestions = await this.getDoctorDiagnosisSuggestions({}, content);
+    // Local Fallbacks based on activeTab
+    if (activeTab === "patients") {
+      const patientCount = await User.countDocuments({ role: "PATIENT", assignedDoctor: doctorId });
       return {
-        reply: `Based on complaints: ${suggestions.reasoning}`,
-        keyTakeaways: ["Potential differentials: " + suggestions.suggestions.join(", ")],
-        recommendations: suggestions.safetyPrecautions
+        reply: `EMR Patient Registry: You have ${patientCount} assigned patients registered under your clinical care. You can open their charting drawer to review history details.`,
+        keyTakeaways: ["Patient histories contain vitals timelines, prescriptions, and lab tests.", "New patients are warded directly via the Reception tab."],
+        recommendations: ["Ensure chronic conditions and known allergen classifications are completed."]
       };
     }
 
-    if (lower.includes("allergy") || lower.includes("interaction") || lower.includes("pills") || lower.includes("meds")) {
+    if (activeTab === "appointments") {
+      const appointments = await Appointment.find({ doctor: doctorId }).populate("patient", "firstName lastName");
+      const list = appointments.map(a => `${a.patient?.firstName} ${a.patient?.lastName} (${a.timeSlot})`).join(", ");
       return {
-        reply: "Medication review triggered. Ensure to check if the patient has recorded penicillin or sulfa allergies before adding broad-spectrum antibiotics.",
-        keyTakeaways: ["Warfarin combined with antiplatelets is contraindicated.", "Check for active MAR entries in the patient's record."],
-        recommendations: ["Review EMR prescription profile.", "Validate drug interaction risk values before dispensing."]
+        reply: `Your appointment agenda: Today you have ${appointments.length} consultations scheduled. Listing: ${list || "No consultations logged."}`,
+        keyTakeaways: [`Total consults today: ${appointments.length}.`, "Queue updates dynamically as receptionist registers check-ins."],
+        recommendations: ["Mark appointments as COMPLETED after consulting.", "Optimize schedule slots if delays occur."]
+      };
+    }
+
+    if (activeTab === "labs") {
+      const labs = await LabRequest.find({ prescribedBy: doctorId, status: { $ne: "COMPLETED" } }).populate("patient", "firstName lastName");
+      const list = labs.map(l => `${l.testName} for ${l.patient?.firstName} ${l.patient?.lastName}`).join(", ");
+      return {
+        reply: `Lab Diagnostics Monitor: There are ${labs.length} pending lab test reports. Listing: ${list || "No pending reports."}`,
+        keyTakeaways: ["Check reports directly in completed list once lab technician uploads results.", "Auto-alarms trigger if blood values check critically abnormal."],
+        recommendations: ["Review completed labs and write appropriate clinical comments."]
+      };
+    }
+
+    if (activeTab === "admissions") {
+      return {
+        reply: "Warded Inpatient Admissions: Bed allocation and ward tracking are synched. Ensure vitals are updated regularly by nursing staff.",
+        keyTakeaways: ["Critical patients should be flagged for ICU monitoring.", "Discharge approval registers the release of beds."],
+        recommendations: ["Verify room allocations for warded consults.", "Approve ready discharges to free bed count."]
+      };
+    }
+
+    // Default chatbot logic
+    // 1. Today's appointments / queue waiting list
+    if (lower.includes("appointment") || lower.includes("waiting") || lower.includes("queue") || lower.includes("schedule")) {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const appointments = await Appointment.find({
+        doctor: doctorId,
+        appointmentDate: { $gte: startOfDay, $lte: endOfDay }
+      }).populate("patient", "firstName lastName uhid");
+
+      const bookList = appointments.map(a => `Token #${a.tokenNumber}: ${a.patient?.firstName} ${a.patient?.lastName} (${a.status})`).join(", ") || "None";
+      const waitingCount = appointments.filter(a => a.status === "CHECKED_IN").length;
+
+      return {
+        reply: `Today's schedule: you have ${appointments.length} appointments. Patient queue listing: ${bookList}. Currently ${waitingCount} patients are checked in and waiting.`,
+        keyTakeaways: [`Total consults scheduled today: ${appointments.length}.`, `Checked-in queue size: ${waitingCount}.`],
+        recommendations: ["Select patient from list to open EMR charting drawer.", "Mark appointment completed after consult."]
+      };
+    }
+
+    // 2. Critical patients lookup
+    if (lower.includes("critical") || lower.includes("alert") || lower.includes("emergency")) {
+      const patients = await User.find({ role: "PATIENT", assignedDoctor: doctorId });
+      const patientIds = patients.map(p => p._id);
+
+      const vitals = await VitalsRecord.find({ patient: { $in: patientIds } })
+        .populate("patient", "firstName lastName roomNo bedNo")
+        .sort({ createdAt: -1 });
+
+      const latestVitalsMap = new Map();
+      for (const record of vitals) {
+        if (record.patient && !latestVitalsMap.has(record.patient._id.toString())) {
+          latestVitalsMap.set(record.patient._id.toString(), record);
+        }
+      }
+
+      const criticalNames = [];
+      for (const record of latestVitalsMap.values()) {
+        const issues = [];
+        if (record.spo2 && record.spo2 < 92) issues.push(`SpO2 ${record.spo2}%`);
+        if (record.heartRate && (record.heartRate > 130 || record.heartRate < 40)) issues.push(`HR ${record.heartRate} bpm`);
+        if (record.temperature && parseFloat(record.temperature) > 103.0) issues.push(`Temp ${record.temperature}°F`);
+
+        if (issues.length > 0) {
+          criticalNames.push(`${record.patient?.firstName} ${record.patient?.lastName} (Ward: ${record.patient?.roomNo}, Bed: ${record.patient?.bedNo}) [Issues: ${issues.join(", ")}]`);
+        }
+      }
+
+      return {
+        reply: criticalNames.length > 0 
+          ? `⚠️ CLINICAL ALARMS: The following assigned patients have critical vitals: ${criticalNames.join("; ")}.` 
+          : "✅ All assigned inpatients are clinically stable. Vitals logs show no threshold alerts.",
+        keyTakeaways: [`Critical threshold alerts active: ${criticalNames.length}.`, "ICU patients are monitored continuously."],
+        recommendations: ["Open charting drawer immediately to review clinical history.", "Administer required medications or update clinical tagging."]
+      };
+    }
+
+    // 3. Pending lab reports
+    if (lower.includes("lab") || lower.includes("report") || lower.includes("test")) {
+      const labs = await LabRequest.find({ prescribedBy: doctorId, status: { $ne: "COMPLETED" } })
+        .populate("patient", "firstName lastName uhid");
+
+      const labList = labs.map(l => `${l.testName} for ${l.patient?.firstName} ${l.patient?.lastName} (${l.status})`).join(", ") || "None";
+
+      return {
+        reply: `Pending diagnostic tests: ${labList}.`,
+        keyTakeaways: [`Total pending lab requests: ${labs.length}.`],
+        recommendations: ["Check with Lab Technician if samples are collected.", "Verify completed report files in Labs page."]
+      };
+    }
+
+    // 4. Summarize patient medical history
+    if (lower.includes("summarize") || lower.includes("history") || lower.includes("robert") || lower.includes("pravalika")) {
+      let patientName = lower.includes("pravalika") ? "pravalika" : "Robert";
+      const patient = await User.findOne({ firstName: new RegExp(patientName, "i"), role: "PATIENT" });
+      if (patient) {
+        const summary = await this.getPatientSummary(patient._id);
+        return {
+          reply: `Clinical EMR Summary for Patient ${patient.firstName} ${patient.lastName}: ${summary.summary} Prescription details: ${summary.medicationReview} Lab results interpretation: ${summary.labInterpretation}`,
+          keyTakeaways: summary.healthTips,
+          recommendations: ["Maintain regular logs of blood pressure.", "Review EMR prescriptions regularly."]
+        };
+      }
+    }
+
+    // 5. Patient list / My patients query
+    if (lower.includes("patient list") || lower.includes("patients list") || lower.includes("my patients") || lower.includes("show patients") || lower.includes("list patients")) {
+      const patients = await User.find({ role: "PATIENT", assignedDoctor: doctorId });
+      const namesList = patients.map(p => `${p.firstName} ${p.lastName} (UHID: ${p.uhid || "N/A"})`).join(", ");
+      return {
+        reply: patients.length > 0 
+          ? `Your assigned patients list: ${namesList}. You have a total of ${patients.length} patients registered under your clinical care.` 
+          : "You currently have no assigned patients registered under your clinical care.",
+        keyTakeaways: [`Total assigned patients: ${patients.length}.`, "You can view their EMR charts via the Patients tab."],
+        recommendations: ["Click 'Open Chart File' in the patient table to view vitals history and notes."]
       };
     }
 
     return {
-      reply: "I have parsed your clinical note. All active indicators and physiological logs for patients on your round lists are loaded.",
-      keyTakeaways: ["Emphasize: 'Final medical choices rest with authorized doctor only.'"],
-      recommendations: ["Consult the EMR logs.", "Run AI Scribe on consult shorthand notes."]
+      reply: "Clinical EMR systems are synced. Use EMR shortcuts to prescribe meds, request lab tests, or update patient warded logs.",
+      keyTakeaways: ["Patient EMR records are logged securely.", "AI assistant runs within sandboxed EHR environment."],
+      recommendations: ["Ask me about waiting patient queues, critical vitals, or request patient EMR summary."]
     };
   }
 }

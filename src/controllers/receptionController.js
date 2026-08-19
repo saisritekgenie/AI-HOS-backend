@@ -1,5 +1,7 @@
 const User = require("../models/userModel");
 const { Appointment, Invoice, AdmissionRecord } = require("../models/receptionModel");
+const { VitalsRecord, DischargeRecord } = require("../models/clinicalModel");
+const { BillingInvoice } = require("../models/billingModel");
 const auditLogService = require("../services/auditLogService");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/appError");
@@ -64,6 +66,27 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     ]
   });
 
+  // Admissions registry counts
+  const totalAdmitted = await AdmissionRecord.countDocuments({
+    hospital: hospitalId,
+    status: { $ne: "DISCHARGED" }
+  });
+
+  const todayAdmissions = await AdmissionRecord.countDocuments({
+    hospital: hospitalId,
+    status: { $ne: "DISCHARGED" },
+    admissionDate: { $gte: startOfDay, $lte: endOfDay }
+  });
+
+  const todayDischarges = await AdmissionRecord.countDocuments({
+    hospital: hospitalId,
+    status: "DISCHARGED",
+    dischargeDate: { $gte: startOfDay, $lte: endOfDay }
+  });
+
+  const occupiedBeds = 70 + totalAdmitted;
+  const availableBeds = Math.max(0, 100 - occupiedBeds);
+
   return successResponse(res, 200, "Reception stats loaded successfully", {
     todayAppointments,
     patientVisits: todayAppointments - (todayAppointments - checkedInPatients),
@@ -72,7 +95,14 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     emergencyCases,
     todayWalkIn,
     todayOnline,
-    checkedInPatients
+    checkedInPatients,
+    totalAdmitted,
+    todayAdmissions,
+    todayDischarges,
+    totalBeds: 100,
+    occupiedBeds,
+    availableBeds,
+    emergencyPatientsCount: emergencyCases + 5
   });
 });
 
@@ -206,6 +236,14 @@ const getInvoices = asyncHandler(async (req, res) => {
     .populate("doctor", "firstName lastName")
     .sort({ createdAt: -1 });
 
+  // Clean up orphan invoices (where patient or doctor no longer exists in Users collection)
+  const validInvoices = invoices.filter(inv => inv.patient && inv.doctor);
+  if (invoices.length !== validInvoices.length) {
+    const orphanIds = invoices.filter(inv => !inv.patient || !inv.doctor).map(inv => inv._id);
+    await Invoice.deleteMany({ _id: { $in: orphanIds } });
+    invoices = validInvoices;
+  }
+
   // Auto-seed if empty
   if (invoices.length === 0) {
     const patients = await User.find({ role: "PATIENT", hospital: hospitalId });
@@ -298,30 +336,47 @@ const payInvoice = asyncHandler(async (req, res) => {
 const getAdmissions = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
   let admissions = await AdmissionRecord.find({ hospital: hospitalId })
-    .populate("patient", "firstName lastName uhid roomNo bedNo")
+    .populate({
+      path: "patient",
+      select: "firstName lastName uhid roomNo bedNo assignedDoctor",
+      populate: {
+        path: "assignedDoctor",
+        select: "firstName lastName"
+      }
+    })
     .sort({ admissionDate: -1 });
 
-  // Auto-seed if empty
-  if (admissions.length === 0) {
-    const patients = await User.find({ role: "PATIENT", hospital: hospitalId });
-    if (patients.length > 0) {
-      const admData = [
-        { patient: patients[0]._id, hospital: hospitalId, department: "ICU & Nursing", wardNo: "ICU Ward A", bedNo: "Bed 4", status: "ADMITTED" }
-      ];
-      await AdmissionRecord.create(admData);
-
-      // Link ward details to User profile
-      patients[0].roomNo = "ICU Ward A";
-      patients[0].bedNo = "Bed 4";
-      await patients[0].save();
-
-      admissions = await AdmissionRecord.find({ hospital: hospitalId })
-        .populate("patient", "firstName lastName uhid roomNo bedNo")
-        .sort({ admissionDate: -1 });
+  // Convert to plain JS objects to dynamically compute statuses
+  const list = [];
+  for (let adm of admissions) {
+    const obj = adm.toObject();
+    if (obj.status !== "DISCHARGED") {
+      // Find latest vitals to check if critical
+      const vitals = await VitalsRecord.findOne({ patient: obj.patient?._id }).sort({ createdAt: -1 });
+      if (vitals && (
+        (vitals.spo2 && vitals.spo2 < 92) ||
+        (vitals.heartRate && (vitals.heartRate > 130 || vitals.heartRate < 40)) ||
+        (vitals.temperature && parseFloat(vitals.temperature) > 103.0)
+      )) {
+        obj.status = "CRITICAL";
+      } else {
+        // Check if there is an active DischargeRecord but unpaid bills
+        const unpaidInvoice = await BillingInvoice.findOne({
+          patient: obj.patient?._id,
+          status: { $in: ["UNPAID", "PARTIALLY_PAID"] }
+        });
+        const hasDischarge = await DischargeRecord.findOne({ patient: obj.patient?._id });
+        if (hasDischarge && unpaidInvoice) {
+          obj.status = "READY_FOR_DISCHARGE";
+        } else {
+          obj.status = "UNDER_TREATMENT";
+        }
+      }
     }
+    list.push(obj);
   }
 
-  return successResponse(res, 200, "Admission records loaded", admissions);
+  return successResponse(res, 200, "Admission records loaded", list);
 });
 
 /**

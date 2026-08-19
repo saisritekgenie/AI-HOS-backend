@@ -127,7 +127,7 @@ const admissionRecordSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["ADMITTED", "DISCHARGED"],
+      enum: ["ADMITTED", "UNDER_TREATMENT", "CRITICAL", "READY_FOR_DISCHARGE", "DISCHARGED"],
       default: "ADMITTED",
     },
     admissionDate: {

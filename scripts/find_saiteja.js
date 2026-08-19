@@ -13,21 +13,21 @@ const run = async () => {
       console.error("MONGO_URI not found in env variables!");
       process.exit(1);
     }
-    
+
     await mongoose.connect(process.env.MONGO_URI);
     console.log("Connected to MongoDB...");
-    
+
     const users = await User.find({});
     console.log(`Fetched ${users.length} users. Searching...`);
-    
+
     const results = [];
     for (const u of users) {
       const matchName = (u.firstName && u.firstName.toLowerCase().includes("saiteja")) ||
-                        (u.lastName && u.lastName.toLowerCase().includes("saiteja")) ||
-                        (u.firstName && u.firstName.toLowerCase().includes("kims")) ||
-                        (u.lastName && u.lastName.toLowerCase().includes("kims")) ||
-                        (u.email && u.email.toLowerCase().includes("saiteja")) ||
-                        (u.email && u.email.toLowerCase().includes("kims"));
+        (u.lastName && u.lastName.toLowerCase().includes("saiteja")) ||
+        (u.firstName && u.firstName.toLowerCase().includes("kims")) ||
+        (u.lastName && u.lastName.toLowerCase().includes("kims")) ||
+        (u.email && u.email.toLowerCase().includes("saiteja")) ||
+        (u.email && u.email.toLowerCase().includes("kims"));
       if (matchName) {
         results.push({
           id: u._id,
@@ -40,7 +40,7 @@ const run = async () => {
         });
       }
     }
-    
+
     console.log("SEARCH_RESULTS_START");
     console.log(JSON.stringify(results, null, 2));
     console.log("SEARCH_RESULTS_END");

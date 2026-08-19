@@ -34,8 +34,8 @@ const getFollowUpRecommendations = asyncHandler(async (req, res) => {
 
 const chat = asyncHandler(async (req, res) => {
   const doctorId = req.user._id;
-  const { content } = req.body;
-  const reply = await doctorAIService.processChat(content, doctorId);
+  const { content, activeTab } = req.body;
+  const reply = await doctorAIService.processChat(content, doctorId, activeTab);
   return successResponse(res, 200, "AI Doctor response compiled", reply);
 });
 

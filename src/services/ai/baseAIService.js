@@ -115,6 +115,146 @@ class BaseAIService {
     const greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "howdy", "hola", "yo"];
     return greetings.includes(cleanContent) || cleanContent.match(/^(hi|hello|hey|yo)[\s.!?]*$/i);
   }
+
+  /**
+   * Retrieve structured live hospital data from the database scoped by hospitalId
+   */
+  async getHospitalDatabaseContext(hospitalId, queryText = "") {
+    if (!hospitalId) return "No hospital ID provided. No database context available.";
+
+    // Load models dynamically to prevent circular dependency
+    const User = require("../../models/userModel");
+    const Hospital = require("../../models/hospitalModel");
+    const { Appointment, AdmissionRecord, Invoice } = require("../../models/receptionModel");
+    const { VitalsRecord, LabRequest, Consultation, MedicationRecord } = require("../../models/clinicalModel");
+    const { BillingInvoice } = require("../../models/billingModel");
+    const { Medicine } = require("../../models/pharmacyModel");
+
+    try {
+      const hospital = await Hospital.findById(hospitalId);
+      const hospitalName = hospital ? hospital.name : "KIMS Hospital";
+
+      // 1. Fetch all users for this hospital (to decrypt in memory)
+      const allUsers = await User.find({ hospital: hospitalId });
+      const staffList = allUsers.filter(u => u.role !== "PATIENT");
+      const patientList = allUsers.filter(u => u.role === "PATIENT");
+
+      // Check if user is asking about a specific patient
+      const lowerQuery = queryText.toLowerCase();
+      let targetedPatients = [];
+      
+      // Look for patient name matches in the query
+      for (const p of patientList) {
+        const first = (p.firstName || "").toLowerCase();
+        const last = (p.lastName || "").toLowerCase();
+        if ((first && lowerQuery.includes(first)) || 
+            (last && lowerQuery.includes(last)) || 
+            (p.uhid && lowerQuery.includes(p.uhid.toLowerCase())) || 
+            (p.patientId && lowerQuery.includes(p.patientId.toLowerCase()))) {
+          targetedPatients.push(p);
+        }
+      }
+
+      // If we found targeted patients, filter clinical and billing records to those patients.
+      // Otherwise, get all patients.
+      const hasTargetPatients = targetedPatients.length > 0;
+      const patientFilterIds = hasTargetPatients ? targetedPatients.map(p => p._id) : patientList.map(p => p._id);
+
+      // 2. Fetch other related collections in parallel
+      const [appointments, admissions, vitals, labs, medications, consultations, invoices, billingInvoices, medicines] = await Promise.all([
+        Appointment.find({ hospital: hospitalId }).populate("patient", "firstName lastName").populate("doctor", "firstName lastName"),
+        AdmissionRecord.find({ hospital: hospitalId }).populate("patient", "firstName lastName"),
+        VitalsRecord.find({ hospital: hospitalId, patient: { $in: patientFilterIds } }).populate("patient", "firstName lastName").sort({ createdAt: -1 }).limit(hasTargetPatients ? 15 : 10),
+        LabRequest.find({ hospital: hospitalId, patient: { $in: patientFilterIds } }).populate("patient", "firstName lastName").populate("prescribedBy", "firstName lastName").sort({ createdAt: -1 }).limit(hasTargetPatients ? 15 : 10),
+        MedicationRecord.find({ hospital: hospitalId, patient: { $in: patientFilterIds } }).populate("patient", "firstName lastName").populate("prescribedBy", "firstName lastName").sort({ createdAt: -1 }).limit(hasTargetPatients ? 15 : 10),
+        Consultation.find({ hospital: hospitalId, patient: { $in: patientFilterIds } }).populate("patient", "firstName lastName").populate("doctor", "firstName lastName").sort({ createdAt: -1 }).limit(hasTargetPatients ? 15 : 10),
+        Invoice.find({ hospital: hospitalId, patient: { $in: patientFilterIds } }).populate("patient", "firstName lastName").sort({ createdAt: -1 }).limit(10),
+        BillingInvoice.find({ hospital: hospitalId, patient: { $in: patientFilterIds } }).populate("patient", "firstName lastName").sort({ createdAt: -1 }).limit(10),
+        Medicine.find({ hospital: hospitalId }).limit(20)
+      ]);
+
+      // Format patient list (limiting to 20 or targeted ones to avoid token bloat)
+      const displayedPatients = hasTargetPatients ? targetedPatients : patientList.slice(0, 15);
+      const patientSummary = displayedPatients.map(p => 
+        `- Name: ${p.firstName} ${p.lastName} | UHID: ${p.uhid || "N/A"} | PatientID: ${p.patientId || "N/A"} | Age/Gender: ${p.age || "N/A"}/${p.gender} | Room/Bed: ${p.roomNo}/${p.bedNo} | Status: ${p.status} | Allergies: ${p.allergies?.join(",") || "None"} | Chronic Diseases: ${p.chronicDiseases?.join(",") || "None"}`
+      ).join("\n");
+
+      const staffSummary = staffList.map(s => 
+        `- Name: ${s.firstName} ${s.lastName} | Role: ${s.role} | Department: ${s.department || "General"} | Status: ${s.status}`
+      ).join("\n");
+
+      const appointSummary = appointments.map(a => 
+        `- Token #${a.tokenNumber} | Patient: ${a.patient?.firstName} ${a.patient?.lastName} | Doctor: Dr. ${a.doctor?.firstName} ${a.doctor?.lastName} | Time Slot: ${a.timeSlot} | Status: ${a.status} | Notes: ${a.notes || "None"}`
+      ).slice(0, 15).join("\n");
+
+      const admissionSummary = admissions.map(ad => 
+        `- Patient: ${ad.patient?.firstName} ${ad.patient?.lastName} | Ward/Bed: ${ad.wardNo || ad.roomNo || "N/A"}/${ad.bedNo} | Admitted At: ${new Date(ad.admissionDate || ad.admittedAt || ad.createdAt).toLocaleString()} | Status: ${ad.status} | Department: ${ad.department}`
+      ).slice(0, 15).join("\n");
+
+      const vitalsSummary = vitals.map(v => 
+        `- Patient: ${v.patient?.firstName} ${v.patient?.lastName} | SpO2: ${v.spo2}% | HR: ${v.heartRate} bpm | Temp: ${v.temperature}°F | BP: ${v.bp} | Sugar: ${v.sugar} | Recorded At: ${new Date(v.createdAt).toLocaleString()}`
+      ).join("\n");
+
+      const labsSummary = labs.map(l => 
+        `- Patient: ${l.patient?.firstName} ${l.patient?.lastName} | Test: ${l.testName} | Prescribed By: Dr. ${l.prescribedBy?.firstName || "N/A"} | Status: ${l.status} | Results: ${l.results || "Pending"} | Emergency: ${l.isEmergency ? "YES" : "NO"}`
+      ).join("\n");
+
+      const medsSummary = medications.map(m => 
+        `- Patient: ${m.patient?.firstName} ${m.patient?.lastName} | Medicine: ${m.medicationName} | Dosage: ${m.dosage} | Frequency: ${m.frequency} | Status: ${m.status}`
+      ).join("\n");
+
+      const consultationsSummary = consultations.map(c => 
+        `- Patient: ${c.patient?.firstName} ${c.patient?.lastName} | Doctor: Dr. ${c.doctor?.firstName} ${c.doctor?.lastName} | Diagnosis: ${c.diagnosis} | Notes: ${c.clinicalNotes}`
+      ).join("\n");
+
+      const invoiceSummary = [
+        ...invoices.map(i => `- Outpatient Invoice ${i.invoiceNumber} | Patient: ${i.patient?.firstName} ${i.patient?.lastName} | Amount: INR ${i.billAmount} | Status: ${i.paymentStatus} | Method: ${i.paymentMethod}`),
+        ...billingInvoices.map(b => `- Inpatient Invoice ${b.billNumber} | Patient: ${b.patient?.firstName} ${b.patient?.lastName} | Item: ${b.itemName} | Amount: INR ${b.amount} | Status: ${b.paymentStatus}`)
+      ].slice(0, 15).join("\n");
+
+      const pharmacySummary = medicines.map(m => 
+        `- Medicine: ${m.name} | Stock: ${m.stock} | Price: INR ${m.price} | Expiry: ${new Date(m.expiryDate).toLocaleDateString()}`
+      ).join("\n");
+
+      return `
+Hospital: ${hospitalName} (${hospital ? hospital.code : "KIMS"})
+Live Hospital Database Context (Current state of EMR):
+
+PATIENTS RECORDS:
+${patientSummary || "No patients registered."}
+
+STAFF ROSTER:
+${staffSummary || "No staff registered."}
+
+TODAY'S SCHEDULED APPOINTMENTS:
+${appointSummary || "No appointments registered."}
+
+ACTIVE ADMISSIONS:
+${admissionSummary || "No warded stays."}
+
+LATEST PATIENT VITALS LOGS:
+${vitalsSummary || "No vitals logged."}
+
+LATEST LAB DIAGNOSTICS:
+${labsSummary || "No lab requests logged."}
+
+MEDICATIONS PRESCRIBED:
+${medsSummary || "No medication rounds logged."}
+
+CLINICAL CONSULTATIONS:
+${consultationsSummary || "No clinical consult records."}
+
+BILLING & INVOICES:
+${invoiceSummary || "No invoices."}
+
+PHARMACY DRUG STOCK:
+${pharmacySummary || "No pharmacy inventories."}
+`;
+    } catch (error) {
+      console.error("Error generating global hospital context:", error);
+      return `Error generating global hospital context: ${error.message}`;
+    }
+  }
 }
 
 module.exports = BaseAIService;

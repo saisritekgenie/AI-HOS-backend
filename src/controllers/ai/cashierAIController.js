@@ -10,8 +10,8 @@ const getCashierInsights = asyncHandler(async (req, res) => {
 
 const chat = asyncHandler(async (req, res) => {
   const hospitalId = req.user.hospital;
-  const { content } = req.body;
-  const reply = await cashierAIService.processChat(content, hospitalId);
+  const { content, activeTab } = req.body;
+  const reply = await cashierAIService.processChat(content, hospitalId, activeTab);
   return successResponse(res, 200, "AI Cashier response compiled", reply);
 });
 

@@ -197,6 +197,11 @@ const userSchema = new mongoose.Schema(
       coverageAmount: { type: Number, default: 0 },
       expiryDate: { type: Date },
     },
+    availability: {
+      days: { type: [String], default: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"] },
+      startTime: { type: String, default: "09:00 AM" },
+      endTime: { type: String, default: "05:00 PM" }
+    },
     familyMapping: [
       {
         patient: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

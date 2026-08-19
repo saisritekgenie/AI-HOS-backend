@@ -10,8 +10,8 @@ const getVitalsEmergencyCheck = asyncHandler(async (req, res) => {
 
 const chat = asyncHandler(async (req, res) => {
   const nurseId = req.user._id;
-  const { content } = req.body;
-  const reply = await nurseAIService.processChat(content, nurseId);
+  const { content, activeTab } = req.body;
+  const reply = await nurseAIService.processChat(content, nurseId, activeTab);
   return successResponse(res, 200, "AI Nurse response compiled", reply);
 });
 

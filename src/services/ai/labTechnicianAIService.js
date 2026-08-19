@@ -69,17 +69,42 @@ class LabTechnicianAIService extends BaseAIService {
     };
   }
 
-  async processChat(content, techId) {
+  async processChat(content, techId, activeTab) {
+    const User = require("../../models/userModel");
+    const techDoc = await User.findById(techId);
+    const hospitalId = techDoc?.hospital;
+
+    const lower = content.toLowerCase();
+
+    // 1. Gather context data based on activeTab
+    let tabContext = "";
+    try {
+      if (activeTab === "labs") {
+        const { LabRequest } = require("../../models/clinicalModel");
+        const pendingLabsCount = await LabRequest.countDocuments({ status: { $ne: "COMPLETED" }, hospital: hospitalId });
+        const completedLabsCount = await LabRequest.countDocuments({ status: "COMPLETED", hospital: hospitalId });
+        tabContext = `Active Dashboard page: Labs. Total pending lab requests: ${pendingLabsCount}. Completed lab reports: ${completedLabsCount}.`;
+      } else {
+        tabContext = `Active Dashboard page: Lab Technician Queue.`;
+      }
+    } catch (err) {
+      console.error("Error fetching lab tab context:", err);
+      tabContext = `Active Dashboard page: ${activeTab}. Context fetch failed.`;
+    }
+
     if (this.isGreeting(content)) {
       return {
-        reply: "Hello! I am your AI Lab Assistant. I can help you summarize diagnostic report contents, flag abnormal blood index values, or check standard test ranges. How can I help you today?",
+        reply: `Hello! I am your AI Lab Assistant. Currently assisting you on the ${activeTab || "labs"} dashboard. I can help you summarize diagnostic report contents, flag abnormal blood index values, or check standard test ranges. How can I help you today?`,
         keyTakeaways: ["I assist with clinical laboratory findings validation."],
         recommendations: ["Check test parameters, review abnormal limits, or write diagnostic summaries."]
       };
     }
 
-    const userPrompt = `Input: ${content}`;
-    const systemPrompt = "You are the AI Lab Assistant. Answer questions regarding blood counts, laboratory index thresholds, and report details. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
+    // Retrieve global database context
+    const dbContext = await this.getHospitalDatabaseContext(hospitalId, content);
+
+    const userPrompt = `Dashboard Context: ${tabContext}\n\nLive Database Context:\n${dbContext}\n\nUser Request: ${content}`;
+    const systemPrompt = "You are the AI Lab Assistant. Answer questions regarding blood counts, laboratory index thresholds, report details, patient diagnostics, and lab requests using the provided Live Database Context and Dashboard Context. Be extremely specific, reference actual patient names and diagnostic findings from the context. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
 
     const llmResult = await this.callLLM(systemPrompt, userPrompt);
     if (llmResult) {
@@ -89,7 +114,18 @@ class LabTechnicianAIService extends BaseAIService {
     }
 
     // Local Fallback
-    const lower = content.toLowerCase();
+    if (activeTab === "labs" || lower.includes("lab") || lower.includes("report") || lower.includes("test")) {
+      try {
+        const { LabRequest } = require("../../models/clinicalModel");
+        const pendingCount = await LabRequest.countDocuments({ status: { $ne: "COMPLETED" } });
+        return {
+          reply: `Here are your laboratory analytics: There are currently ${pendingCount} pending diagnostic tests requiring observation input. Enter the details in the fields to complete reports.`,
+          keyTakeaways: ["Diagnostics parameters check complete.", "Double check abnormal indices before confirming."],
+          recommendations: ["Analyze specific report findings in 'Labs' console.", "Flag abnormal indices for consulting doctors."]
+        };
+      } catch (e) {}
+    }
+
     if (lower.includes("hemoglobin") || lower.includes("hb") || lower.includes("anemia")) {
       return {
         reply: "Hemoglobin (Hb) reference values: Adult males generally require 13.8 - 17.2 g/dL, while adult females require 12.1 - 15.1 g/dL. Readings below 10 g/dL indicate mild anemia and require physician attention.",

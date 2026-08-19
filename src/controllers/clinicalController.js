@@ -295,6 +295,27 @@ const updatePatientAssignment = asyncHandler(async (req, res) => {
   }
 
   await patient.save();
+
+  // Keep Admissions registry synced
+  if (req.body.roomNo || req.body.bedNo) {
+    const { AdmissionRecord } = require("../models/receptionModel");
+    let admission = await AdmissionRecord.findOne({ patient: patientId, status: { $ne: "DISCHARGED" }, hospital: hospitalId });
+    if (admission) {
+      if (req.body.roomNo !== undefined) admission.wardNo = req.body.roomNo;
+      if (req.body.bedNo !== undefined) admission.bedNo = req.body.bedNo;
+      await admission.save();
+    } else {
+      await AdmissionRecord.create({
+        patient: patientId,
+        hospital: hospitalId,
+        wardNo: req.body.roomNo || "General Ward",
+        bedNo: req.body.bedNo || "N/A",
+        department: "General Medicine",
+        status: "ADMITTED"
+      });
+    }
+  }
+
   return successResponse(res, 200, "Patient ward allocation updated successfully", patient);
 });
 
@@ -346,14 +367,35 @@ const getAllCriticalAlerts = asyncHandler(async (req, res) => {
   const criticalList = [];
   for (const record of latestVitalsMap.values()) {
     const issues = [];
-    if (record.spo2 && record.spo2 < 95) {
+    let priority = "NORMAL";
+
+    if (record.spo2 && record.spo2 < 92) {
+      issues.push(`Critical Low SpO2 (${record.spo2}%)`);
+      priority = "CRITICAL";
+    } else if (record.spo2 && record.spo2 < 95) {
       issues.push(`Low SpO2 (${record.spo2}%)`);
+      priority = "URGENT";
     }
-    if (record.heartRate && (record.heartRate > 120 || record.heartRate < 50)) {
+
+    if (record.heartRate && (record.heartRate > 130 || record.heartRate < 40)) {
+      issues.push(`Critical Heart Rate (${record.heartRate} bpm)`);
+      priority = "CRITICAL";
+    } else if (record.heartRate && (record.heartRate > 120 || record.heartRate < 55)) {
       issues.push(`Abnormal Heart Rate (${record.heartRate} bpm)`);
+      if (priority !== "CRITICAL") priority = "URGENT";
     }
-    if (record.temperature && parseFloat(record.temperature) > 101.0) {
+
+    if (record.temperature && parseFloat(record.temperature) > 103.0) {
+      issues.push(`Critical High Temperature (${record.temperature}°F)`);
+      priority = "CRITICAL";
+    } else if (record.temperature && parseFloat(record.temperature) > 101.0) {
       issues.push(`High Temperature (${record.temperature}°F)`);
+      if (priority !== "CRITICAL") priority = "URGENT";
+    }
+
+    // Check if ICU ward is required
+    if (record.patient && record.patient.roomNo && (record.patient.roomNo.includes("ICU") || record.patient.roomNo.includes("Emergency"))) {
+      priority = "CRITICAL";
     }
 
     if (issues.length > 0) {
@@ -361,10 +403,17 @@ const getAllCriticalAlerts = asyncHandler(async (req, res) => {
         _id: record._id,
         vitalsRecord: record,
         patient: record.patient,
-        issues: issues.join(", ")
+        issues: issues.join(", "),
+        priority
       });
     }
   }
+
+  // Sort critical list: CRITICAL first, then URGENT, then NORMAL
+  criticalList.sort((a, b) => {
+    const weights = { "CRITICAL": 3, "URGENT": 2, "NORMAL": 1 };
+    return weights[b.priority] - weights[a.priority];
+  });
 
   return successResponse(res, 200, "Critical alerts retrieved", criticalList);
 });
@@ -700,6 +749,15 @@ const dischargePatient = asyncHandler(async (req, res) => {
     patient.roomNo = "N/A";
     patient.bedNo = "N/A";
     await patient.save();
+
+    // Release bed in Admissions registry
+    const { AdmissionRecord } = require("../models/receptionModel");
+    const admission = await AdmissionRecord.findOne({ patient: patientId, status: { $ne: "DISCHARGED" }, hospital: hospitalId });
+    if (admission) {
+      admission.status = "DISCHARGED";
+      admission.dischargeDate = new Date();
+      await admission.save();
+    }
   }
 
   await auditLogService.logActivity(req, {
@@ -780,12 +838,13 @@ const getConsolidatedReport = asyncHandler(async (req, res) => {
   }
 
   // Fetch all clinical records in parallel
-  const [consultations, vitals, labs, invoices, discharge] = await Promise.all([
+  const [consultations, vitals, labs, invoices, discharge, medications] = await Promise.all([
     Consultation.find({ patient: patientId }).populate("doctor", "firstName lastName").sort({ createdAt: -1 }),
     VitalsRecord.find({ patient: patientId }).sort({ recordedAt: -1 }),
     LabRequest.find({ patient: patientId }).populate("prescribedBy sampleCollectedBy", "firstName lastName").sort({ createdAt: -1 }),
     Invoice.find({ patient: patientId }).sort({ createdAt: -1 }),
-    DischargeRecord.findOne({ patient: patientId }).populate("doctor", "firstName lastName")
+    DischargeRecord.findOne({ patient: patientId }).populate("doctor", "firstName lastName"),
+    MedicationRecord.find({ patient: patientId }).populate("prescribedBy givenBy", "firstName lastName").sort({ createdAt: -1 })
   ]);
 
   // Log EMR access for audit compliance
@@ -802,7 +861,8 @@ const getConsolidatedReport = asyncHandler(async (req, res) => {
     vitals,
     labs,
     invoices,
-    discharge
+    discharge,
+    medications
   });
 });
 

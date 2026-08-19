@@ -151,12 +151,20 @@ const getInvoices = asyncHandler(async (req, res) => {
   }
 
   const count = await BillingInvoice.countDocuments(query);
-  const invoices = await BillingInvoice.find(query)
+  let invoices = await BillingInvoice.find(query)
     .populate("patient", "firstName lastName uhid mobile")
     .populate("processedBy", "firstName lastName")
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(Number(limit));
+
+  // Clean up orphan invoices (where patient no longer exists in Users collection)
+  const validInvoices = invoices.filter(inv => inv.patient);
+  if (invoices.length !== validInvoices.length) {
+    const orphanIds = invoices.filter(inv => !inv.patient).map(inv => inv._id);
+    await BillingInvoice.deleteMany({ _id: { $in: orphanIds } });
+    invoices = validInvoices;
+  }
 
   // Seed invoices in INR (₹) if empty to make the cashier counter work immediately
   if (invoices.length === 0 && search === "" && page == 1) {

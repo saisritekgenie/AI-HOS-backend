@@ -16,8 +16,8 @@ const getPharmacyForecast = asyncHandler(async (req, res) => {
 
 const chat = asyncHandler(async (req, res) => {
   const pharmacistId = req.user._id;
-  const { content } = req.body;
-  const reply = await pharmacistAIService.processChat(content, pharmacistId);
+  const { content, activeTab } = req.body;
+  const reply = await pharmacistAIService.processChat(content, pharmacistId, activeTab);
   return successResponse(res, 200, "AI Pharmacist response compiled", reply);
 });
 

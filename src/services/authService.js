@@ -146,7 +146,7 @@ class AuthService {
    * @param {object} profileData
    */
   async updateProfile(userId, profileData) {
-    const { firstName, lastName, mobile, email } = profileData;
+    const { firstName, lastName, mobile, email, availability } = profileData;
     const user = await User.findById(userId);
     if (!user) {
       throw new AppError("User profile not found", 404);
@@ -155,6 +155,7 @@ class AuthService {
     if (lastName) user.lastName = lastName;
     if (mobile) user.mobile = mobile;
     if (email) user.email = email;
+    if (availability) user.availability = availability;
     await user.save();
     return user;
   }

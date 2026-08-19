@@ -111,17 +111,42 @@ class PharmacistAIService extends BaseAIService {
     };
   }
 
-  async processChat(content, pharmacistId) {
+  async processChat(content, pharmacistId, activeTab) {
+    const User = require("../../models/userModel");
+    const pharmacistDoc = await User.findById(pharmacistId);
+    const hospitalId = pharmacistDoc?.hospital;
+
+    const lower = content.toLowerCase();
+
+    // 1. Gather context data based on activeTab
+    let tabContext = "";
+    try {
+      if (activeTab === "pharmacy") {
+        const { Medicine } = require("../../models/pharmacyModel");
+        const totalMeds = await Medicine.countDocuments({ hospital: hospitalId });
+        const lowStockMeds = await Medicine.countDocuments({ stock: { $lt: 15 }, hospital: hospitalId });
+        tabContext = `Active Dashboard page: Pharmacy. Total medicines registered: ${totalMeds}. Low-stock medicine counts: ${lowStockMeds}.`;
+      } else {
+        tabContext = `Active Dashboard page: Pharmacist Queue.`;
+      }
+    } catch (err) {
+      console.error("Error fetching pharmacy tab context:", err);
+      tabContext = `Active Dashboard page: ${activeTab}. Context fetch failed.`;
+    }
+
     if (this.isGreeting(content)) {
       return {
-        reply: "Hello! I am your AI Pharmacy Assistant. I can check potential drug-drug interactions, forecast inventory safety limits, flag stockout/expiry alerts, or suggest generic equivalents. How can I help you today?",
+        reply: `Hello! I am your AI Pharmacy Assistant. Currently assisting you on the ${activeTab || "pharmacy"} dashboard. I can check potential drug-drug interactions, forecast inventory safety limits, flag stockout/expiry alerts, or suggest generic equivalents. How can I help you today?`,
         keyTakeaways: ["I assist with safe pharmaceutical dispensing and supply chain tracking."],
         recommendations: ["Check generic alternatives, run drug interactions review, or check stock forecast details."]
       };
     }
 
-    const userPrompt = `Input: ${content}`;
-    const systemPrompt = "You are the AI Pharmacy Assistant. Answer questions regarding prescription dispensing, drug-drug compatibility, generic medicines, and stockouts. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
+    // Retrieve global database context
+    const dbContext = await this.getHospitalDatabaseContext(hospitalId, content);
+
+    const userPrompt = `Dashboard Context: ${tabContext}\n\nLive Database Context:\n${dbContext}\n\nUser Request: ${content}`;
+    const systemPrompt = "You are the AI Pharmacy Assistant. Answer questions regarding prescription dispensing, drug-drug compatibility, generic medicines, and stockouts using the provided Live Database Context and Dashboard Context. Be extremely specific, reference actual patient prescriptions, medicine names, and stock levels from the context. Return JSON containing: reply (text), keyTakeaways (array of strings), recommendations (array of strings).";
 
     const llmResult = await this.callLLM(systemPrompt, userPrompt);
     if (llmResult) {
@@ -131,7 +156,20 @@ class PharmacistAIService extends BaseAIService {
     }
 
     // Local Fallback
-    const lower = content.toLowerCase();
+    if (activeTab === "pharmacy" || lower.includes("stock") || lower.includes("medicine") || lower.includes("inventory")) {
+      try {
+        const { Medicine } = require("../../models/pharmacyModel");
+        const lowStockCount = await Medicine.countDocuments({ stock: { $lt: 15 } });
+        const list = await Medicine.find({ stock: { $lt: 15 } }).limit(3);
+        const medNames = list.map(m => `${m.name} (${m.stock} left)`).join(", ");
+        return {
+          reply: `Pharmacy Inventory Status: We have ${lowStockCount} medicines running low on stock (< 15 units). Critical items: ${medNames || "None"}. Consider submitting a replenishment request.`,
+          keyTakeaways: ["Auto-replenishment metrics trigger at 15 units threshold.", "Check expiry batched records before dispensing."],
+          recommendations: ["Generate pharmacy forecasting summaries.", "Review vendor supply logs for pending replenishments."]
+        };
+      } catch (e) {}
+    }
+
     if (lower.includes("interaction") || lower.includes("contraindication") || lower.includes("clash")) {
       return {
         reply: "Clinical warning: Aspirin combined with anticoagulants like Warfarin increases risk of internal bleeding. Ibuprofen combined with Aspirin diminishes cardioprotective effects.",

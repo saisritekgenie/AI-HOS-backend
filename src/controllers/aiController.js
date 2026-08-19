@@ -184,6 +184,62 @@ const getVitalsEmergencyCheck = asyncHandler(async (req, res) => {
   return successResponse(res, 200, "AI vitals check complete", alert);
 });
 
+/**
+ * Translate text between English and Telugu
+ */
+const translateText = asyncHandler(async (req, res) => {
+  const { text, targetLanguage, takeaways, recommendations } = req.body;
+  if (!text || !targetLanguage) {
+    throw new AppError("Text and targetLanguage parameters are required", 400);
+  }
+
+  const translated = await aiService.translateText(text, targetLanguage);
+  
+  let translatedTakeaways = undefined;
+  if (Array.isArray(takeaways) && takeaways.length > 0) {
+    translatedTakeaways = await Promise.all(
+      takeaways.map(async (t) => {
+        try {
+          return await aiService.translateText(t, targetLanguage);
+        } catch {
+          return t;
+        }
+      })
+    );
+  }
+
+  let translatedRecommendations = undefined;
+  if (Array.isArray(recommendations) && recommendations.length > 0) {
+    translatedRecommendations = await Promise.all(
+      recommendations.map(async (r) => {
+        try {
+          return await aiService.translateText(r, targetLanguage);
+        } catch {
+          return r;
+        }
+      })
+    );
+  }
+
+  return successResponse(res, 200, "Translation completed successfully", {
+    translated,
+    takeaways: translatedTakeaways,
+    recommendations: translatedRecommendations
+  });
+});
+
+/**
+ * Get AI-powered ICD-10 diagnostic coding suggestions
+ */
+const getIcd10Suggestions = asyncHandler(async (req, res) => {
+  const { diagnosisText } = req.body;
+  if (!diagnosisText) {
+    throw new AppError("Diagnosis text parameter is required", 400);
+  }
+  const suggestions = await aiService.getIcd10Suggestions(diagnosisText);
+  return successResponse(res, 200, "ICD-10 clinical codes retrieved successfully", suggestions);
+});
+
 module.exports = {
   getDashboardInsights,
   getReceptionistAssistance,
@@ -200,4 +256,6 @@ module.exports = {
   getQueuePrediction,
   getFollowUpRecommendations,
   getVitalsEmergencyCheck,
+  translateText,
+  getIcd10Suggestions,
 };

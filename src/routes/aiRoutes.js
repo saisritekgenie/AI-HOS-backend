@@ -23,5 +23,7 @@ router.get("/pharmacy-forecast", aiController.getPharmacyForecast);
 router.post("/queue-prediction", aiController.getQueuePrediction);
 router.post("/followup-recommendations", aiController.getFollowUpRecommendations);
 router.post("/vitals-emergency-check", aiController.getVitalsEmergencyCheck);
+router.post("/translate", aiController.translateText);
+router.post("/icd10-suggestions", aiController.getIcd10Suggestions);
 
 module.exports = router;

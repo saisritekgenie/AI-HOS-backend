@@ -1,5 +1,5 @@
 const dns = require("node:dns");
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
+// dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
 const dotenv = require("dotenv");
 dotenv.config();
@@ -15,6 +15,7 @@ if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length !== 32) {
 }
 
 
+// trigger nodemon restart
 const http = require("http");
 const socketio = require("socket.io");
 const app = require("./src/app");

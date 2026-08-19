@@ -4,7 +4,8 @@ const { successResponse } = require("../../utils/apiResponse");
 
 const chat = asyncHandler(async (req, res) => {
   const { queryType, content } = req.body;
-  const reply = await patientAIService.processChat(queryType || "general", content);
+  const patientId = req.user._id;
+  const reply = await patientAIService.processChat(queryType || "general", content, patientId);
   return successResponse(res, 200, "AI Patient response compiled", reply);
 });
 

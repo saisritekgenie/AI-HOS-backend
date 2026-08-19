@@ -16,8 +16,8 @@ const getReportSummary = asyncHandler(async (req, res) => {
 
 const chat = asyncHandler(async (req, res) => {
   const techId = req.user._id;
-  const { content } = req.body;
-  const reply = await labTechnicianAIService.processChat(content, techId);
+  const { content, activeTab } = req.body;
+  const reply = await labTechnicianAIService.processChat(content, techId, activeTab);
   return successResponse(res, 200, "AI Lab Technician response compiled", reply);
 });
 
