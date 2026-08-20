@@ -29,10 +29,9 @@ const seedMockData = async () => {
       hospital = await Hospital.create({
         name: "MediCore General Hospital",
         code: "MCH",
-        address: "123 Healthcare Blvd, Medical District",
-        contactNumber: "9876543210",
-        email: "contact@medicore.com",
-        status: "ACTIVE"
+        location: "123 Healthcare Blvd, Medical District",
+        status: "ACTIVE",
+        logoUrl: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="%234f46e5"/><path d="M12 6v12M6 12h12" stroke="white" stroke-width="3.5" stroke-linecap="round"/></svg>`,
       });
       console.log("Seeded default hospital:", hospital.name);
     }

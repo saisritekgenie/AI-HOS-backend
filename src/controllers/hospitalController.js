@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const Hospital = require("../models/hospitalModel");
 const User = require("../models/userModel");
 const auditLogService = require("../services/auditLogService");
@@ -5,6 +7,35 @@ const AppError = require("../utils/appError");
 const asyncHandler = require("../utils/asyncHandler");
 const { successResponse } = require("../utils/apiResponse");
 const { hashText } = require("../utils/encryption");
+
+/**
+ * Helper to save base64 image data to disk in uploads directory
+ */
+const saveBase64Logo = (hospitalId, base64String) => {
+  if (!base64String || !base64String.startsWith("data:image/")) {
+    return null;
+  }
+  
+  const matches = base64String.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+  if (!matches || matches.length !== 3) {
+    throw new AppError("Invalid logo image format", 400);
+  }
+  
+  const ext = matches[1] === "svg+xml" ? "svg" : matches[1];
+  const dataBuffer = Buffer.from(matches[2], "base64");
+  
+  const uploadsDir = path.join(__dirname, "../../uploads");
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+  
+  const filename = `hospital_logo_${hospitalId}_${Date.now()}.${ext}`;
+  const filePath = path.join(uploadsDir, filename);
+  
+  fs.writeFileSync(filePath, dataBuffer);
+  return `/uploads/${filename}`;
+};
+
 
 /**
  * @desc    Register a new Hospital & Hospital Admin (Pending Super Admin Approval)
@@ -21,6 +52,7 @@ const registerHospital = asyncHandler(async (req, res) => {
     adminEmail,
     adminMobile,
     adminPassword,
+    logoUrl,
   } = req.body;
 
   const trimmedName = hospitalName ? hospitalName.trim() : "";
@@ -55,6 +87,21 @@ const registerHospital = asyncHandler(async (req, res) => {
     location: trimmedLocation,
     status: "PENDING_APPROVAL",
   });
+
+  if (logoUrl && logoUrl.startsWith("data:image/")) {
+    try {
+      const savedPath = saveBase64Logo(hospital._id, logoUrl);
+      if (savedPath) {
+        hospital.logoUrl = savedPath;
+        await hospital.save();
+      }
+    } catch (err) {
+      console.error("Failed to save logo file during hospital registration:", err);
+    }
+  } else if (logoUrl) {
+    hospital.logoUrl = logoUrl;
+    await hospital.save();
+  }
 
   try {
     // 2) Create Hospital Admin User with PENDING_APPROVAL status
@@ -182,9 +229,45 @@ const rejectHospital = asyncHandler(async (req, res) => {
   return successResponse(res, 200, `Hospital ${hospital.name} status set to INACTIVE.`, hospital);
 });
 
+/**
+ * @desc    Upload Hospital Logo (SUPER_ADMIN only)
+ * @route   PUT /api/super-admin/hospitals/:id/logo
+ * @access  Private (SUPER_ADMIN)
+ */
+const uploadHospitalLogo = asyncHandler(async (req, res) => {
+  const { logoData } = req.body;
+  if (!logoData) {
+    throw new AppError("Please select a logo image file to upload", 400);
+  }
+
+  const hospital = await Hospital.findById(req.params.id);
+  if (!hospital) {
+    throw new AppError("Hospital record not found", 404);
+  }
+
+  const savedPath = saveBase64Logo(hospital._id, logoData);
+  if (!savedPath) {
+    throw new AppError("Invalid image data provided", 400);
+  }
+
+  hospital.logoUrl = savedPath;
+  await hospital.save();
+
+  // Log Audit
+  await auditLogService.logActivity(req, {
+    hospital: hospital._id,
+    module: "SETTINGS",
+    action: "UPDATE_HOSPITAL_LOGO",
+    details: `Uploaded new logo file for hospital ${hospital.name} (${hospital.code}): ${savedPath}`,
+  });
+
+  return successResponse(res, 200, `Successfully uploaded logo for ${hospital.name}!`, hospital);
+});
+
 module.exports = {
   registerHospital,
   getHospitals,
   approveHospital,
   rejectHospital,
+  uploadHospitalLogo,
 };

@@ -65,6 +65,7 @@ const getPatientClinicalSummary = asyncHandler(async (req, res) => {
 
   // Fetch patient profile
   const patient = await User.findOne({ _id: patientId, role: "PATIENT", hospital: hospitalId })
+    .populate("hospital")
     .populate("assignedDoctor", "firstName lastName")
     .populate({
       path: "familyMapping.patient",

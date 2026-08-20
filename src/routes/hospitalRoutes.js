@@ -13,5 +13,6 @@ router.use(restrictTo("SUPER_ADMIN"));
 router.get("/", hospitalController.getHospitals);
 router.put("/:id/approve", hospitalController.approveHospital);
 router.put("/:id/reject", hospitalController.rejectHospital);
+router.put("/:id/logo", hospitalController.uploadHospitalLogo);
 
 module.exports = router;
